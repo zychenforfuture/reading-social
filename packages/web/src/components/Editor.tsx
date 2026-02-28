@@ -8,6 +8,7 @@ interface EditorProps {
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
   onClickCommentBubble: (commentIds: string[]) => void;
+  highlightedBlockHash?: string | null;
 }
 
 interface Tooltip {
@@ -17,7 +18,7 @@ interface Tooltip {
   text: string;
 }
 
-export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble }: EditorProps) {
+export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble, highlightedBlockHash }: EditorProps) {
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -25,6 +26,17 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
   useEffect(() => {
     setTooltip(null);
   }, [content]);
+
+  // 高亮段落时滚动到视口
+  useEffect(() => {
+    if (!highlightedBlockHash) return;
+    const el = containerRef.current?.querySelector(
+      `[data-block-hash="${highlightedBlockHash}"]`
+    ) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightedBlockHash]);
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
@@ -117,8 +129,12 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
               key={block.block_hash}
               data-block-hash={block.block_hash}
               className={[
-                'mb-5',
-                totalCount > 0 ? 'bg-yellow-50 dark:bg-yellow-900/20 rounded px-1' : '',
+                'mb-5 transition-colors duration-300',
+                block.block_hash === highlightedBlockHash
+                  ? 'bg-orange-100 dark:bg-orange-900/30 ring-2 ring-orange-400 rounded px-1'
+                  : totalCount > 0
+                  ? 'bg-yellow-50 dark:bg-yellow-900/20 rounded px-1'
+                  : '',
               ].join(' ')}
             >
               {lines.map((line, lineIdx) => (
