@@ -50,6 +50,11 @@ export default function CommentPanel({
     listRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }, [focusCommentIds]);
 
+  // 选中新段落（发评论模式）时也滚动到顶部
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [selectedBlock?.hash]);
+
   // 选中新段落时清空回复状态
   useEffect(() => {
     setReplyTo(null);
@@ -104,7 +109,9 @@ export default function CommentPanel({
             <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
               {focusCommentIds
                 ? `${focusCommentIds.length} 条`
-                : `${comments.length} 条`}
+                : selectedBlock
+                  ? `${comments.filter(c => c.block_hash === selectedBlock.hash).length} 条`
+                  : `${comments.length} 条`}
             </span>
           </div>
           <button
@@ -117,18 +124,30 @@ export default function CommentPanel({
 
         {/* 评论列表 */}
         <div className="flex-1 overflow-y-auto py-2" ref={listRef}>
-          {comments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
-              <MessageSquare className="h-8 w-8 opacity-30" />
-              <p className="text-sm">还没有评论</p>
-              <p className="text-xs opacity-60">选中文字后点击「评论」</p>
-            </div>
-          ) : (() => {
-            // focusCommentIds 模式：只显示气泡对应的那几条评论
+          {(() => {
+            // 三种过滤模式
+            // 1. 气泡点击：只显示该行的 commentIds
+            // 2. 选中文字发评论：只显示该 block 的评论
+            // 3. 无 focus：显示全部
             const focusSet = focusCommentIds ? new Set(focusCommentIds) : null;
             const displayComments = focusSet
               ? comments.filter(c => focusSet.has(c.id))
-              : comments;
+              : selectedBlock
+                ? comments.filter(c => c.block_hash === selectedBlock.hash)
+                : comments;
+
+            const isFocused = !!focusCommentIds || !!selectedBlock;
+
+            // 全局无评论（整个文档）
+            if (comments.length === 0) {
+              return (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+                  <MessageSquare className="h-8 w-8 opacity-30" />
+                  <p className="text-sm">还没有评论</p>
+                  <p className="text-xs opacity-60">选中文字后点击「评论」</p>
+                </div>
+              );
+            }
 
             const renderComment = (comment: Comment, highlighted = false) => (
               <div
@@ -180,86 +199,84 @@ export default function CommentPanel({
               </div>
             );
 
-            return (
-              <div className="divide-y">
-                {focusCommentIds && (
-                  <div className="px-4 py-1.5 bg-orange-50 dark:bg-orange-900/20">
-                    <span className="text-xs font-medium text-orange-600">
-                      此处评论 {displayComments.length} 条
-                    </span>
-                  </div>
-                )}
-                {displayComments.length === 0 && focusCommentIds ? (
+            // focus 模式：按 selected_text 分组合并
+            const renderGrouped = () => {
+              if (displayComments.length === 0) {
+                return (
                   <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
                     <MessageSquare className="h-6 w-6 opacity-30" />
                     <p className="text-sm">此段暂无评论</p>
                   </div>
-                ) : focusCommentIds ? (
-                  // focus 模式：按 selected_text 分组，相同引用文字合并显示
-                  (() => {
-                    // 按 selected_text（trim 后）分组，保持首次出现顺序
-                    const groupMap = new Map<string, Comment[]>();
-                    for (const c of displayComments) {
-                      const key = c.selected_text?.trim() ?? '';
-                      const arr = groupMap.get(key);
-                      if (arr) arr.push(c);
-                      else groupMap.set(key, [c]);
-                    }
-                    return Array.from(groupMap.entries()).map(([key, groupComments]) => (
-                      <div key={key || '__no_text__'} className="px-4 py-3 bg-orange-50/60 dark:bg-orange-900/15">
-                        {/* 共享引用文字：只渲染一次 */}
-                        {key && (
-                          <div className="mb-2 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground line-clamp-3">
-                            {key}
-                          </div>
-                        )}
-                        {/* 该引用下的所有评论 */}
-                        <div className="space-y-3">
-                          {groupComments.map(comment => (
-                            <div key={comment.id} className="group">
-                              <div className="flex gap-2.5">
-                                <Avatar name={comment.username || '匿名'} />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-baseline gap-2 mb-0.5">
-                                    <span className="text-sm font-medium truncate">
-                                      {comment.username || '匿名用户'}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground shrink-0">
-                                      {timeAgo(comment.created_at)}
-                                    </span>
-                                  </div>
-                                  <p className="text-sm text-foreground leading-relaxed break-words">
-                                    {comment.content}
-                                  </p>
-                                  <div className="flex items-center gap-3 mt-1.5">
-                                    <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                                      <ThumbsUp className="h-3 w-3" />
-                                      <span>赞</span>
-                                    </button>
-                                    <button
-                                      onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                    >
-                                      回复
-                                    </button>
-                                    <button
-                                      onClick={() => deleteMutation.mutate(comment.id)}
-                                      className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                                    >
-                                      删除
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
+                );
+              }
+              const groupMap = new Map<string, Comment[]>();
+              for (const c of displayComments) {
+                const key = c.selected_text?.trim() ?? '';
+                const arr = groupMap.get(key);
+                if (arr) arr.push(c);
+                else groupMap.set(key, [c]);
+              }
+              return Array.from(groupMap.entries()).map(([key, groupComments]) => (
+                <div key={key || '__no_text__'} className="px-4 py-3 bg-orange-50/60 dark:bg-orange-900/15 border-b last:border-b-0">
+                  {key && (
+                    <div className="mb-2 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground line-clamp-3">
+                      {key}
+                    </div>
+                  )}
+                  <div className="space-y-3">
+                    {groupComments.map(comment => (
+                      <div key={comment.id} className="group">
+                        <div className="flex gap-2.5">
+                          <Avatar name={comment.username || '匿名'} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-2 mb-0.5">
+                              <span className="text-sm font-medium truncate">
+                                {comment.username || '匿名用户'}
+                              </span>
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {timeAgo(comment.created_at)}
+                              </span>
                             </div>
-                          ))}
+                            <p className="text-sm text-foreground leading-relaxed break-words">
+                              {comment.content}
+                            </p>
+                            <div className="flex items-center gap-3 mt-1.5">
+                              <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                                <ThumbsUp className="h-3 w-3" />
+                                <span>赞</span>
+                              </button>
+                              <button
+                                onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                回复
+                              </button>
+                              <button
+                                onClick={() => deleteMutation.mutate(comment.id)}
+                                className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    ));
-                  })()
-                ) : (
-                  displayComments.map(c => renderComment(c, false))
+                    ))}
+                  </div>
+                </div>
+              ));
+            };
+
+            return (
+              <div className="divide-y">
+                {isFocused && (
+                  <div className="px-4 py-1.5 bg-orange-50 dark:bg-orange-900/20">
+                    <span className="text-xs font-medium text-orange-600">
+                      此段评论 {displayComments.length} 条
+                    </span>
+                  </div>
                 )}
+                {isFocused ? renderGrouped() : displayComments.map(c => renderComment(c, false))}
               </div>
             );
           })()}
