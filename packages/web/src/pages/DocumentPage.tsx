@@ -1,6 +1,6 @@
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { useState, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useMemo, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, BookOpen, MessageSquare } from 'lucide-react';
 import { api, type ContentBlock, type Comment, timeAgo, cn } from '../lib/utils';
 import Editor from '../components/Editor';
@@ -155,6 +155,7 @@ function ChapterComments({ chapterBlocks, comments, onSelectBlock }: ChapterComm
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const [selectedBlock, setSelectedBlock] = useState<{ hash: string; text: string } | null>(null);
   const [currentChapter, setCurrentChapter] = useState(0);
   const [showTOC, setShowTOC] = useState(false);
@@ -171,7 +172,54 @@ export default function DocumentPage() {
     queryKey: ['document-comments', id],
     queryFn: () => api.getDocumentComments(id!),
     enabled: !!id,
+    // SSE 实时推送新评论，不再轮询
+    staleTime: Infinity,
   });
+
+  // SSE 实时推送：有新评论时刷新评论数据
+  useEffect(() => {
+    if (!id) return;
+
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retries = 0;
+    const MAX_RETRIES = 10;
+
+    const connect = () => {
+      // 读取 token，额外用 query param 传递（EventSource 不支持设置 Header）
+      let token = '';
+      try {
+        const stored = localStorage.getItem('collab-auth');
+        if (stored) token = JSON.parse(stored)?.state?.token ?? '';
+      } catch {}
+
+      const url = `/api/comments/stream/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      es = new EventSource(url);
+
+      es.onmessage = () => {
+        // 收到新评论事件，触发评论数据刷新
+        queryClient.invalidateQueries({ queryKey: ['document-comments', id] });
+      };
+
+      es.onopen = () => { retries = 0; };
+
+      es.onerror = () => {
+        es?.close();
+        if (retries < MAX_RETRIES) {
+          // 指数退避重连：1s, 2s, 4s … 最够 30s
+          const delay = Math.min(1000 * 2 ** retries, 30000);
+          retries++;
+          retryTimer = setTimeout(connect, delay);
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      es?.close();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [id, queryClient]);
 
   const allBlocks = data?.content ?? [];
   const blockCommentCount = commentsData?.blockCommentCount ?? {};
@@ -193,7 +241,9 @@ export default function DocumentPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const totalComments = commentsData?.comments?.length ?? 0;
+  const allComments = commentsData?.comments ?? [];
+  const chapterBlockHashSet = new Set(chapterBlocks.map(b => b.block_hash));
+  const chapterCommentCount = allComments.filter(c => chapterBlockHashSet.has(c.block_hash)).length;
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20">加载中...</div>;
@@ -223,9 +273,9 @@ export default function DocumentPage() {
           >
             <MessageSquare className="h-4 w-4" />
             评论
-            {totalComments > 0 && (
+            {chapterCommentCount > 0 && (
               <span className="absolute -top-1.5 -right-2 bg-primary text-primary-foreground text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                {totalComments > 99 ? '99+' : totalComments}
+                {chapterCommentCount > 99 ? '99+' : chapterCommentCount}
               </span>
             )}
           </button>

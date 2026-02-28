@@ -7,7 +7,7 @@ import { useState, useRef } from 'react';
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useUserStore();
+  const { isAuthenticated, user } = useUserStore();
   const queryClient = useQueryClient();
   const [newDocTitle, setNewDocTitle] = useState('');
   const [newDocContent, setNewDocContent] = useState('');
@@ -21,6 +21,11 @@ export default function HomePage() {
     queryKey: ['documents'],
     queryFn: () => api.getDocuments(),
     enabled: isAuthenticated,
+    // 有文档处于"处理中"时每 3 秒自动刷新
+    refetchInterval: (query) => {
+      const hasProcessing = query.state.data?.documents?.some((d: Document) => d.status === 'processing');
+      return hasProcessing ? 3000 : false;
+    },
   });
 
   const createMutation = useMutation({
@@ -258,6 +263,12 @@ export default function HomePage() {
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
+              {user?.is_admin && doc.uploader && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className="bg-muted rounded px-1.5 py-0.5">上传者</span>
+                  <span className="font-medium text-foreground">{doc.uploader}</span>
+                </div>
+              )}
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 <span>{doc.word_count || 0} 字</span>
                 <span>{doc.block_count || 0} 块</span>

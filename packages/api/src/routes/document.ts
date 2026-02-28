@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
+import { documentQueue } from '../config/queue.js';
 
 const router: Router = Router();
 
@@ -11,13 +12,51 @@ const uploadSchema = z.object({
   content: z.string(),
 });
 
-// 列出用户文档
-router.get('/', async (req, res) => {
+// 从 Authorization header 解析当前登录用户信息
+async function getCallerInfo(req: Request): Promise<{ userId: string | null; isAdmin: boolean }> {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer dummy_token_')) {
+    return { userId: null, isAdmin: false };
+  }
+  const userId = auth.replace('Bearer dummy_token_', '');
   try {
-    // TODO: 从 JWT 获取用户 ID，暂时返回所有未绑定用户的文档
-    const result = await pool.query(
-      'SELECT id, title, word_count, block_count, status, created_at, updated_at FROM documents WHERE user_id IS NULL ORDER BY created_at DESC'
-    );
+    const r = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
+    if (r.rows.length === 0) return { userId: null, isAdmin: false };
+    return { userId, isAdmin: r.rows[0].is_admin === true };
+  } catch {
+    return { userId: null, isAdmin: false };
+  }
+}
+
+// 列出用户文档
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { userId, isAdmin } = await getCallerInfo(req);
+
+    let result;
+    if (isAdmin) {
+      // 管理员看所有文档
+      result = await pool.query(
+        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
+                u.username as uploader
+         FROM documents d
+         LEFT JOIN users u ON d.user_id = u.id
+         ORDER BY d.created_at DESC`
+      );
+    } else if (userId) {
+      // 普通用户只看自己的
+      result = await pool.query(
+        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
+                u.username as uploader
+         FROM documents d
+         LEFT JOIN users u ON d.user_id = u.id
+         WHERE d.user_id = $1
+         ORDER BY d.created_at DESC`,
+        [userId]
+      );
+    } else {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     res.json({ documents: result.rows });
   } catch (error) {
@@ -123,20 +162,23 @@ router.get('/:id/comments', async (req, res) => {
 });
 
 // 上传/创建文档
-router.post('/', async (req, res) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const { title, content } = uploadSchema.parse(req.body);
 
-    // TODO: 从 JWT 获取用户 ID，暂时使用 NULL
-    const userId = null;
+    // 从 Authorization header 获取用户 ID
+    const { userId } = await getCallerInfo(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     // 计算文件哈希 (用于秒传)
     const crypto = await import('crypto');
     const fileHash = crypto.createHash('md5').update(content).digest('hex');
 
-    // 检查是否已存在相同文件
+    // 检查是否已存在相同文件（同一用户）
     const existing = await pool.query(
-      'SELECT id FROM documents WHERE file_hash = $1 AND user_id IS NOT DISTINCT FROM $2',
+      'SELECT id FROM documents WHERE file_hash = $1 AND user_id = $2',
       [fileHash, userId]
     );
 
@@ -156,43 +198,19 @@ router.post('/', async (req, res) => {
 
     const docId = docResult.rows[0].id;
 
-    // 按自然段（单行换行）切分，去除 \r 和空行
-    const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+    // 将处理任务推入 BullMQ 队列，立即返回给前端
+    // 只传 documentId，content 已存 DB，worker 直接读取避免大文本进 Redis
+    await documentQueue.add('process-document', { documentId: docId });
 
-    for (let i = 0; i < blocks.length; i++) {
-      const blockContent = blocks[i]!.trim();
-      const blockHash = crypto.createHash('sha256').update(blockContent).digest('hex');
-
-      // 插入或更新内容块
-      await pool.query(
-        `INSERT INTO content_blocks (block_hash, raw_content, normalized_content, word_count)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (block_hash) DO UPDATE SET occurrence_count = content_blocks.occurrence_count + 1`,
-        [blockHash, blockContent, blockContent, blockContent.length]
-      );
-
-      // 插入文档 - 块映射
-      await pool.query(
-        'INSERT INTO document_blocks (document_id, block_hash, sequence_order) VALUES ($1, $2, $3)',
-        [docId, blockHash, i]
-      );
-    }
-
-    // 更新文档状态
-    await pool.query(
-      'UPDATE documents SET word_count = $1, block_count = $2, status = $3 WHERE id = $4',
-      [content.length, blocks.length, 'ready', docId]
-    );
-
-    logger.info(`Document created: ${docId}, blocks: ${blocks.length}`);
+    logger.info(`Document queued for processing: ${docId}`);
 
     res.json({
       document: {
         id: docId,
         title,
-        word_count: content.length,
-        block_count: blocks.length,
-        status: 'ready',
+        word_count: content.length,   // 字符数作为初始估算值
+        block_count: 0,
+        status: 'processing',
         created_at: docResult.rows[0].created_at,
       },
     });

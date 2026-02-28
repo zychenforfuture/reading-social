@@ -5,11 +5,79 @@ import { logger } from '../config/logger.js';
 
 const router: Router = Router();
 
+// ─── SSE 客户端注册表 ────────────────────────────────────────────
+// documentId → Set<Response>（存每个打开文档的长连接）
+const sseClients = new Map<string, Set<Response>>();
+
+function addSseClient(documentId: string, res: Response): void {
+  if (!sseClients.has(documentId)) sseClients.set(documentId, new Set());
+  sseClients.get(documentId)!.add(res);
+}
+
+function removeSseClient(documentId: string, res: Response): void {
+  const clients = sseClients.get(documentId);
+  if (clients) {
+    clients.delete(res);
+    if (clients.size === 0) sseClients.delete(documentId);
+  }
+}
+
+function broadcastToDocument(documentId: string, data: object): void {
+  const clients = sseClients.get(documentId);
+  if (!clients || clients.size === 0) return;
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  for (const res of clients) {
+    try { res.write(payload); } catch { /* 客户端已断开 */ }
+  }
+}
+// ────────────────────────────────────────────────────────────────
+
+// 从 Authorization header 解析当前用户 ID
+async function getUserId(req: Request): Promise<string | null> {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer dummy_token_')) return null;
+  const userId = auth.replace('Bearer dummy_token_', '');
+  try {
+    const r = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    return r.rows.length > 0 ? userId : null;
+  } catch {
+    return null;
+  }
+}
+
 const commentSchema = z.object({
   content: z.string().min(1).max(5000),
   blockHash: z.string().length(64), // SHA-256 hex
   parentCommentId: z.string().uuid().optional(),
   selectedText: z.string().max(500).optional(),
+});
+
+// SSE 推送：订阅文档的实时评论更新
+router.get('/stream/:documentId', (req: Request, res: Response) => {
+  const documentId = String(req.params['documentId'] ?? '');
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // 关闭 nginx 缓冲，SSE 立即推送
+  res.flushHeaders();
+
+  // 初始心跳确认连接建立
+  res.write(': connected\n\n');
+
+  addSseClient(documentId, res);
+  logger.info(`SSE connected: doc=${documentId.substring(0, 8)}… clients=${sseClients.get(documentId)?.size}`);
+
+  // 每 25s 发心跳，防止 nginx/负载均衡器因空闲超时断开连接
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch { clearInterval(heartbeat); }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    removeSseClient(documentId, res);
+    logger.info(`SSE disconnected: doc=${documentId.substring(0, 8)}…`);
+  });
 });
 
 // 获取某内容块的所有评论
@@ -48,12 +116,11 @@ router.get('/block/:hash', async (req, res) => {
 });
 
 // 创建评论
-router.post('/', async (req, res) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const { content, blockHash, parentCommentId, selectedText } = commentSchema.parse(req.body);
 
-    // TODO: 从 JWT 获取用户 ID，暂时使用 NULL
-    const userId = null;
+    const userId = await getUserId(req);
 
     // 确保 selected_text 列存在（兼容旧数据库）
     await pool.query(`
@@ -63,13 +130,31 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO comments (block_hash, user_id, content, parent_comment_id, selected_text)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, block_hash, content, parent_comment_id, selected_text, created_at`,
+       RETURNING id, block_hash, user_id, content, parent_comment_id, selected_text, created_at`,
       [blockHash, userId, content, parentCommentId || null, selectedText || null]
     );
 
-    logger.info(`Comment created: ${result.rows[0].id} on block ${blockHash.substring(0, 8)}...`);
+    // 补充 username
+    const comment = result.rows[0];
+    if (userId) {
+      const userResult = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+      comment.username = userResult.rows[0]?.username ?? null;
+    }
 
-    res.status(201).json({ comment: result.rows[0] });
+    logger.info(`Comment created: ${comment.id} on block ${blockHash.substring(0, 8)}...`);
+
+    // 广播到所有订阅了含该 block 的文档的 SSE 客户端
+    try {
+      const docRows = await pool.query(
+        'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',
+        [blockHash]
+      );
+      for (const row of docRows.rows) {
+        broadcastToDocument(row.document_id, { type: 'new_comment', comment });
+      }
+    } catch { /* 广播失败不影响正常响应 */ }
+
+    res.status(201).json({ comment });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });

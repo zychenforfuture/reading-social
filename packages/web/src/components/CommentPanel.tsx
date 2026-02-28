@@ -70,7 +70,7 @@ export default function CommentPanel({
       queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] });
       setNewComment('');
       setReplyTo(null);
-      onClearSelection();
+      // 不清除 selectedBlock，保持抽屉继续显示该 block 的评论
     },
   });
 

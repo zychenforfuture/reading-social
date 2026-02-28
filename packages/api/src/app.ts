@@ -13,6 +13,9 @@ import { blockRoutes } from './routes/block.js';
 
 const app: Express = express();
 
+// 信任 nginx 反向代理，正确识别真实客户端 IP
+app.set('trust proxy', 1);
+
 // 安全中间件
 app.use(helmet());
 app.use(cors({
@@ -23,7 +26,7 @@ app.use(cors({
 // 限流中间件
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分钟
-  max: 100, // 每个 IP 最多 100 个请求
+  max: 1000, // 每个 IP 最多 1000 个请求（轮询场景下 100 太低）
   message: 'Too many requests from this IP, please try again later.',
 });
 app.use('/api', limiter);

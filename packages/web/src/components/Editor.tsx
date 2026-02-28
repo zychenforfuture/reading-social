@@ -74,15 +74,11 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
     return () => window.removeEventListener('scroll', hide, true);
   }, []);
 
-  const totalComments = Object.values(blockCommentCount).reduce((a, b) => a + b, 0);
-
   return (
     <div className="border rounded-lg bg-card" ref={containerRef}>
       <div className="border-b px-4 py-2 bg-muted/50">
         <span className="text-sm text-muted-foreground">
-          {content.length} 个内容块
-          {totalComments > 0 && ` · ${totalComments} 条评论`}
-          <span className="ml-2 text-xs opacity-60">选中文字可发表评论</span>
+          <span className="text-xs opacity-60">选中文字可发表评论</span>
         </span>
       </div>
 

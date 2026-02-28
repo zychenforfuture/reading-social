@@ -28,12 +28,22 @@ export const api: {
   baseURL: import.meta.env?.VITE_API_URL || '/api',
 
   async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    // 从 localStorage 读取持久化的 token
+    let token: string | null = null;
+    try {
+      const stored = localStorage.getItem('collab-auth');
+      if (stored) token = JSON.parse(stored)?.state?.token ?? null;
+    } catch {}
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options?.headers as Record<string, string>),
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     const response = await fetch(`${api.baseURL}${endpoint}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -97,6 +107,7 @@ export type User = {
   email: string;
   username: string;
   avatar_url?: string;
+  is_admin?: boolean;
 };
 
 export type Document = {
@@ -107,6 +118,7 @@ export type Document = {
   status: 'processing' | 'ready' | 'error';
   created_at: string;
   updated_at: string;
+  uploader?: string;  // 仅管理员可见
 };
 
 export type ContentBlock = {
