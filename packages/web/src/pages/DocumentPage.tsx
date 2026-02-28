@@ -87,41 +87,60 @@ function ChapterComments({ chapterBlocks, comments, onSelectBlock }: ChapterComm
       <div className="divide-y">
         {groups.map(({ block, comments: gc }) => {
           const excerpt = block.raw_content.split('\n')[0]?.trim().slice(0, 80) ?? '';
+
+          // 按 selected_text 二级分组，保持首次出现顺序
+          const textGroupMap = new Map<string, Comment[]>();
+          for (const c of gc) {
+            const key = c.selected_text?.trim() ?? '';
+            const arr = textGroupMap.get(key);
+            if (arr) arr.push(c);
+            else textGroupMap.set(key, [c]);
+          }
+
           return (
             <div key={block.block_hash} className="px-4 py-3">
-              {/* 段落摘要 */}
+              {/* 段落摘要（可点击） */}
               <button
                 onClick={() => onSelectBlock(block.block_hash, excerpt)}
-                className="w-full text-left mb-2 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground hover:text-foreground transition-colors line-clamp-1"
+                className="w-full text-left mb-3 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground hover:text-foreground transition-colors line-clamp-1"
               >
                 {excerpt}
                 {block.raw_content.trim().length > 80 && '…'}
               </button>
-              {/* 该段的所有评论 */}
-              <div className="space-y-2">
-                {gc.map(c => (
-                  <div key={c.id} className="flex gap-2 items-start">
-                    <div
-                      className={cn(
-                        'w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-medium shrink-0',
-                        ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'][
-                          (c.username?.charCodeAt(0) ?? 0) % 6
-                        ],
-                      )}
-                    >
-                      {(c.username ?? '匿').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-1.5 mb-0.5">
-                        <span className="text-xs font-medium">{c.username ?? '匿名用户'}</span>
-                        <span className="text-xs text-muted-foreground">{timeAgo(c.created_at)}</span>
+
+              {/* 按引用文字分组 */}
+              <div className="space-y-3">
+                {Array.from(textGroupMap.entries()).map(([key, groupComments]) => (
+                  <div key={key || '__no_text__'}>
+                    {/* 共享引用文字：只显示一次 */}
+                    {key && (
+                      <div className="mb-2 pl-2 border-l-2 border-muted-foreground/20 text-xs text-muted-foreground line-clamp-2">
+                        {key}
                       </div>
-                      {c.selected_text && (
-                        <div className="mb-1 pl-2 border-l border-muted-foreground/30 text-xs text-muted-foreground line-clamp-1">
-                          {c.selected_text}
+                    )}
+                    {/* 该引用下的所有评论 */}
+                    <div className="space-y-2">
+                      {groupComments.map(c => (
+                        <div key={c.id} className="flex gap-2 items-start">
+                          <div
+                            className={cn(
+                              'w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-medium shrink-0',
+                              ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'][
+                                (c.username?.charCodeAt(0) ?? 0) % 6
+                              ],
+                            )}
+                          >
+                            {(c.username ?? '匿').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-1.5 mb-0.5">
+                              <span className="text-xs font-medium">{c.username ?? '匿名用户'}</span>
+                              <span className="text-xs text-muted-foreground">{timeAgo(c.created_at)}</span>
+                            </div>
+                            <p className="text-sm leading-relaxed break-words">{c.content}</p>
+                          </div>
                         </div>
-                      )}
-                      <p className="text-sm leading-relaxed break-words">{c.content}</p>
+                      ))}
                     </div>
                   </div>
                 ))}
