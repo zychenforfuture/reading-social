@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Comment, cn, timeAgo } from '../lib/utils';
+import { useUserStore } from '../stores/userStore';
 import { X, ThumbsUp, MessageSquare, Send } from 'lucide-react';
 
 interface CommentPanelProps {
@@ -34,6 +35,7 @@ export default function CommentPanel({
   focusCommentIds,
 }: CommentPanelProps) {
   const queryClient = useQueryClient();
+  const { user } = useUserStore();
   const [newComment, setNewComment] = useState('');
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -187,12 +189,14 @@ export default function CommentPanel({
                       >
                         回复
                       </button>
-                      <button
-                        onClick={() => deleteMutation.mutate(comment.id)}
-                        className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        删除
-                      </button>
+                      {(user?.is_admin || comment.user_id === user?.id) && (
+                        <button
+                          onClick={() => deleteMutation.mutate(comment.id)}
+                          className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          删除
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -251,12 +255,14 @@ export default function CommentPanel({
                               >
                                 回复
                               </button>
-                              <button
-                                onClick={() => deleteMutation.mutate(comment.id)}
-                                className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                删除
-                              </button>
+                              {(user?.is_admin || comment.user_id === user?.id) && (
+                                <button
+                                  onClick={() => deleteMutation.mutate(comment.id)}
+                                  className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                                >
+                                  删除
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>

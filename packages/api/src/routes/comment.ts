@@ -213,17 +213,39 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// 删除评论 (软删除)
+// 删除评论 (软删除) — 只能删自己的，管理员可删所有
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    const userId = await getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // 查评论归属 + 当前用户是否管理员
+    const [commentRow, userRow] = await Promise.all([
+      pool.query('SELECT user_id FROM comments WHERE id = $1 AND is_deleted = false', [id]),
+      pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]),
+    ]);
+
+    if (commentRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    const isAdmin = userRow.rows[0]?.is_admin === true;
+    const commentOwnerId = commentRow.rows[0].user_id;
+
+    if (!isAdmin && commentOwnerId !== userId) {
+      return res.status(403).json({ error: 'Cannot delete other users\' comments' });
+    }
 
     await pool.query(
       "UPDATE comments SET is_deleted = true, content = '[Deleted]' WHERE id = $1",
       [id]
     );
 
-    logger.info(`Comment soft deleted: ${id}`);
+    logger.info(`Comment soft deleted: ${id} by user ${userId}`);
     res.json({ message: 'Comment deleted' });
   } catch (error) {
     logger.error('Delete comment error:', error);
