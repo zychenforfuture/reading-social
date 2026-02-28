@@ -150,15 +150,14 @@ router.post('/', async (req, res) => {
 
     // 创建文档记录
     const docResult = await pool.query(
-      'INSERT INTO documents (user_id, title, file_hash, status) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
-      [userId, title, fileHash, 'processing']
+      'INSERT INTO documents (user_id, title, file_hash, status, content) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at',
+      [userId, title, fileHash, 'processing', content]
     );
 
     const docId = docResult.rows[0].id;
 
-    // TODO: 将内容切片任务发送到队列
-    // 这里暂时同步处理
-    const blocks = content.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+    // 按自然段（单行换行）切分，去除 \r 和空行
+    const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
 
     for (let i = 0; i < blocks.length; i++) {
       const blockContent = blocks[i]!.trim();

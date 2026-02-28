@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
-    file_hash VARCHAR(64),  -- 整文件 MD5 (秒传用)
+    content TEXT,                   -- 原始文本，用于重新分块
+    file_hash VARCHAR(64),          -- 整文件 MD5 (秒传用)
     word_count INTEGER DEFAULT 0,
     block_count INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'processing',  -- processing, ready, error

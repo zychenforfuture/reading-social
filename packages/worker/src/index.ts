@@ -24,8 +24,8 @@ const fingerprintWorker = new Worker(
     try {
       const crypto = await import('crypto');
 
-      // 按段落切分
-      const blocks = content.split(/\n\s*\n/).filter((p: string) => p.trim().length > 0);
+      // 按自然段（单行换行）切分，去除 \r 和空行
+      const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
 
       logger.info(`Document ${documentId}: found ${blocks.length} blocks`);
 
