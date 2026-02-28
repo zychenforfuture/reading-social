@@ -1,4 +1,5 @@
 import { Queue, Worker } from 'bullmq';
+import { createHash } from 'crypto';
 import { pool } from './db/database.js';
 import { logger } from './utils/logger.js';
 
@@ -32,8 +33,6 @@ const fingerprintWorker = new Worker(
     const content: string = docRow.rows[0].content;
 
     try {
-      const crypto = await import('crypto');
-
       // 按自然段（单行换行）切分，去除 \r 和空行
       const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
 
@@ -44,7 +43,7 @@ const fingerprintWorker = new Worker(
       // 预计算所有 block 数据
       const blockData: BlockItem[] = blocks.map((blockContent: string, i: number) => ({
         content: blockContent,
-        hash: crypto.createHash('sha256').update(blockContent).digest('hex'),
+        hash: createHash('sha256').update(blockContent).digest('hex'),
         simHash: computeSimHash(blockContent),
         seq: i,
       }));
@@ -99,7 +98,8 @@ const fingerprintWorker = new Worker(
 
       logger.info(`Document ${documentId} processed successfully`);
     } catch (error) {
-      logger.error(`Error processing document ${documentId}:`, error);
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`Error processing document ${documentId}: ${msg}`);
       await pool.query(
         "UPDATE documents SET status = 'error' WHERE id = $1",
         [documentId]
@@ -115,14 +115,12 @@ fingerprintWorker.on('completed', (job) => {
 });
 
 fingerprintWorker.on('failed', (job, err) => {
-  logger.error(`Job ${job?.id} failed:`, err);
+  logger.error(`Job ${job?.id} failed: ${err?.message ?? String(err)}`);
 });
 
 // 计算 SimHash (简化版本)
 function computeSimHash(text: string): string {
-  const crypto = require('crypto');
-  const hash = crypto.createHash('md5').update(text).digest('hex');
-  return hash;
+  return createHash('md5').update(text).digest('hex');
 }
 
 // 优雅关闭
