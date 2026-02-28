@@ -7,7 +7,7 @@ interface EditorProps {
   blockCommentCount: Record<string, number>;
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
-  onClickCommentBubble: (blockHash: string) => void;
+  onClickCommentBubble: (commentIds: string[]) => void;
 }
 
 interface Tooltip {
@@ -98,26 +98,22 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
           // 按 \n 拆成子段落
           const lines = block.raw_content.split('\n');
 
-          // 计算每行末尾应显示的气泡数：selected_text 落在该行就计入
-          // 没有 selected_text 的评论算在最后一行
-          const lineCounts: number[] = lines.map(() => 0);
-          let noTextCount = 0;
+          // 按行收集评论 ID：selected_text 落在哪行，该评论 ID 就归到那行
+          // 没有 selected_text 或找不到所在行的评论，归到最后一行
+          const lineCommentIds: string[][] = lines.map(() => []);
           for (const c of blockComments) {
+            let placed = false;
             if (c.selected_text) {
-              // 找第一个包含 selected_text 前20字的行
               const probe = c.selected_text.trim().substring(0, 20);
               const idx = lines.findIndex(l => l.includes(probe));
               if (idx >= 0) {
-                lineCounts[idx]++;
-              } else {
-                noTextCount++; // 找不到就算最后行
+                lineCommentIds[idx].push(c.id);
+                placed = true;
               }
-            } else {
-              noTextCount++;
             }
-          }
-          if (noTextCount > 0) {
-            lineCounts[lines.length - 1] += noTextCount;
+            if (!placed) {
+              lineCommentIds[lines.length - 1].push(c.id);
+            }
           }
 
           return (
@@ -135,14 +131,14 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
                   className="leading-8 text-base text-foreground break-words"
                 >
                   {line}
-                  {lineCounts[lineIdx] > 0 && (
+                  {lineCommentIds[lineIdx].length > 0 && (
                     <button
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={(e) => { e.stopPropagation(); onClickCommentBubble(block.block_hash); }}
+                      onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[lineIdx]); }}
                       className="inline-flex items-center justify-center ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none align-middle transition-colors cursor-pointer select-none"
                       style={{ verticalAlign: 'middle' }}
                     >
-                      {lineCounts[lineIdx]}
+                      {lineCommentIds[lineIdx].length}
                     </button>
                   )}
                 </p>

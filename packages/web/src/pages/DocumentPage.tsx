@@ -140,7 +140,7 @@ export default function DocumentPage() {
   const [currentChapter, setCurrentChapter] = useState(0);
   const [showTOC, setShowTOC] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [focusBlockHash, setFocusBlockHash] = useState<string | null>(null);
+  const [focusCommentIds, setFocusCommentIds] = useState<string[] | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['document', id],
@@ -253,11 +253,11 @@ export default function DocumentPage() {
         comments={commentsData?.comments ?? []}
         onSelectBlock={(hash, text) => {
           setSelectedBlock({ hash, text });
-          setFocusBlockHash(null);
+          setFocusCommentIds(null);
           setShowComments(true);
         }}
-        onClickCommentBubble={(hash) => {
-          setFocusBlockHash(hash);
+        onClickCommentBubble={(ids) => {
+          setFocusCommentIds(ids);
           setSelectedBlock(null);
           setShowComments(true);
         }}
@@ -271,8 +271,8 @@ export default function DocumentPage() {
         selectedBlock={selectedBlock}
         onClearSelection={() => setSelectedBlock(null)}
         open={showComments}
-        onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusBlockHash(null); }}
-        focusBlockHash={focusBlockHash}
+        onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusCommentIds(null); }}
+        focusCommentIds={focusCommentIds}
       />
 
       {/* 本章全部评论 */}
@@ -281,7 +281,7 @@ export default function DocumentPage() {
         comments={commentsData?.comments ?? []}
         onSelectBlock={(hash, text) => {
           setSelectedBlock({ hash, text });
-          setFocusBlockHash(null);
+          setFocusCommentIds(null);
           setShowComments(true);
         }}
       />

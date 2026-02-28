@@ -11,7 +11,7 @@ interface CommentPanelProps {
   onClearSelection: () => void;
   open: boolean;
   onClose: () => void;
-  focusBlockHash?: string | null;
+  focusCommentIds?: string[] | null;
 }
 
 function Avatar({ name }: { name: string }) {
@@ -31,7 +31,7 @@ export default function CommentPanel({
   onClearSelection,
   open,
   onClose,
-  focusBlockHash,
+  focusCommentIds,
 }: CommentPanelProps) {
   const queryClient = useQueryClient();
   const [newComment, setNewComment] = useState('');
@@ -45,10 +45,10 @@ export default function CommentPanel({
     }
   }, [selectedBlock, open]);
 
-  // 切换焦点段落时滚动到顶部
+  // 切换焦点评论组时滚动到顶部
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [focusBlockHash]);
+  }, [focusCommentIds]);
 
   // 选中新段落时清空回复状态
   useEffect(() => {
@@ -102,8 +102,8 @@ export default function CommentPanel({
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
             <span className="font-semibold text-sm">评论</span>
             <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
-              {focusBlockHash
-                ? `${comments.filter(c => c.block_hash === focusBlockHash).length} 条`
+              {focusCommentIds
+                ? `${focusCommentIds.length} 条`
                 : `${comments.length} 条`}
             </span>
           </div>
@@ -124,9 +124,10 @@ export default function CommentPanel({
               <p className="text-xs opacity-60">选中文字后点击「评论」</p>
             </div>
           ) : (() => {
-            // focusBlockHash 模式：只显示该块的评论
-            const displayComments = focusBlockHash
-              ? comments.filter(c => c.block_hash === focusBlockHash)
+            // focusCommentIds 模式：只显示气泡对应的那几条评论
+            const focusSet = focusCommentIds ? new Set(focusCommentIds) : null;
+            const displayComments = focusSet
+              ? comments.filter(c => focusSet.has(c.id))
               : comments;
 
             const renderComment = (comment: Comment, highlighted = false) => (
@@ -181,20 +182,20 @@ export default function CommentPanel({
 
             return (
               <div className="divide-y">
-                {focusBlockHash && (
+                {focusCommentIds && (
                   <div className="px-4 py-1.5 bg-orange-50 dark:bg-orange-900/20">
                     <span className="text-xs font-medium text-orange-600">
-                      此段评论 {displayComments.length} 条
+                      此处评论 {displayComments.length} 条
                     </span>
                   </div>
                 )}
-                {displayComments.length === 0 && focusBlockHash ? (
+                {displayComments.length === 0 && focusCommentIds ? (
                   <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
                     <MessageSquare className="h-6 w-6 opacity-30" />
                     <p className="text-sm">此段暂无评论</p>
                   </div>
                 ) : (
-                  displayComments.map(c => renderComment(c, !!focusBlockHash))
+                  displayComments.map(c => renderComment(c, !!focusCommentIds))
                 )}
               </div>
             );
