@@ -194,8 +194,71 @@ export default function CommentPanel({
                     <MessageSquare className="h-6 w-6 opacity-30" />
                     <p className="text-sm">此段暂无评论</p>
                   </div>
+                ) : focusCommentIds ? (
+                  // focus 模式：按 selected_text 分组，相同引用文字合并显示
+                  (() => {
+                    // 按 selected_text（trim 后）分组，保持首次出现顺序
+                    const groupMap = new Map<string, Comment[]>();
+                    for (const c of displayComments) {
+                      const key = c.selected_text?.trim() ?? '';
+                      const arr = groupMap.get(key);
+                      if (arr) arr.push(c);
+                      else groupMap.set(key, [c]);
+                    }
+                    return Array.from(groupMap.entries()).map(([key, groupComments]) => (
+                      <div key={key || '__no_text__'} className="px-4 py-3 bg-orange-50/60 dark:bg-orange-900/15">
+                        {/* 共享引用文字：只渲染一次 */}
+                        {key && (
+                          <div className="mb-2 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground line-clamp-3">
+                            {key}
+                          </div>
+                        )}
+                        {/* 该引用下的所有评论 */}
+                        <div className="space-y-3">
+                          {groupComments.map(comment => (
+                            <div key={comment.id} className="group">
+                              <div className="flex gap-2.5">
+                                <Avatar name={comment.username || '匿名'} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-baseline gap-2 mb-0.5">
+                                    <span className="text-sm font-medium truncate">
+                                      {comment.username || '匿名用户'}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground shrink-0">
+                                      {timeAgo(comment.created_at)}
+                                    </span>
+                                  </div>
+                                  <p className="text-sm text-foreground leading-relaxed break-words">
+                                    {comment.content}
+                                  </p>
+                                  <div className="flex items-center gap-3 mt-1.5">
+                                    <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                                      <ThumbsUp className="h-3 w-3" />
+                                      <span>赞</span>
+                                    </button>
+                                    <button
+                                      onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                      回复
+                                    </button>
+                                    <button
+                                      onClick={() => deleteMutation.mutate(comment.id)}
+                                      className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                                    >
+                                      删除
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()
                 ) : (
-                  displayComments.map(c => renderComment(c, !!focusCommentIds))
+                  displayComments.map(c => renderComment(c, false))
                 )}
               </div>
             );
