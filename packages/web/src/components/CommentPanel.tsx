@@ -110,7 +110,13 @@ export default function CommentPanel({
               {focusCommentIds
                 ? `${focusCommentIds.length} 条`
                 : selectedBlock
-                  ? `${comments.filter(c => c.block_hash === selectedBlock.hash).length} 条`
+                  ? `${comments.filter(c => {
+                      if (c.block_hash !== selectedBlock.hash) return false;
+                      if (!c.selected_text) return true;
+                      const selProbe = selectedBlock.text.trim().substring(0, 15);
+                      const comProbe = c.selected_text.trim().substring(0, 15);
+                      return c.selected_text.includes(selProbe) || selectedBlock.text.includes(comProbe);
+                    }).length} 条`
                   : `${comments.length} 条`}
             </span>
           </div>
@@ -133,7 +139,17 @@ export default function CommentPanel({
             const displayComments = focusSet
               ? comments.filter(c => focusSet.has(c.id))
               : selectedBlock
-                ? comments.filter(c => c.block_hash === selectedBlock.hash)
+                ? comments.filter(c => {
+                    if (c.block_hash !== selectedBlock.hash) return false;
+                    // 没有 selected_text 的评论属于整段，始终显示
+                    if (!c.selected_text) return true;
+                    // 用互相探针判断文本是否重叠：
+                    // 取当前选中文字前15字，看是否在评论引用里出现；
+                    // 反向也检查，保证局部选中也能匹配超集引用
+                    const selProbe = selectedBlock.text.trim().substring(0, 15);
+                    const comProbe = c.selected_text.trim().substring(0, 15);
+                    return c.selected_text.includes(selProbe) || selectedBlock.text.includes(comProbe);
+                  })
                 : comments;
 
             const isFocused = !!focusCommentIds || !!selectedBlock;
