@@ -2,7 +2,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, BookOpen, MessageSquare } from 'lucide-react';
-import { api, type ContentBlock } from '../lib/utils';
+import { api, type ContentBlock, type Comment, timeAgo, cn } from '../lib/utils';
 import Editor from '../components/Editor';
 import CommentPanel from '../components/CommentPanel';
 import TableOfContents, { type Chapter } from '../components/TableOfContents';
@@ -54,6 +54,84 @@ function buildChapters(blocks: ContentBlock[], blockCommentCount: Record<string,
     i = end;
   }
   return chapters;
+}
+
+// -------- 本章评论区（页面底部内联展示）--------
+interface ChapterCommentsProps {
+  chapterBlocks: ContentBlock[];
+  comments: Comment[];
+  onSelectBlock: (hash: string, text: string) => void;
+}
+
+function ChapterComments({ chapterBlocks, comments, onSelectBlock }: ChapterCommentsProps) {
+  const blockHashSet = new Set(chapterBlocks.map(b => b.block_hash));
+  const chapterComments = comments.filter(c => blockHashSet.has(c.block_hash));
+  if (chapterComments.length === 0) return null;
+
+  // 按 block 顺序分组
+  const groups: { block: ContentBlock; comments: Comment[] }[] = [];
+  for (const block of chapterBlocks) {
+    const bc = chapterComments.filter(c => c.block_hash === block.block_hash);
+    if (bc.length > 0) groups.push({ block, comments: bc });
+  }
+
+  return (
+    <div className="mt-6 border rounded-lg bg-card">
+      <div className="border-b px-4 py-2.5 bg-muted/50 flex items-center gap-2">
+        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">本章评论</span>
+        <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
+          {chapterComments.length} 条
+        </span>
+      </div>
+      <div className="divide-y">
+        {groups.map(({ block, comments: gc }) => {
+          const excerpt = block.raw_content.split('\n')[0]?.trim().slice(0, 80) ?? '';
+          return (
+            <div key={block.block_hash} className="px-4 py-3">
+              {/* 段落摘要 */}
+              <button
+                onClick={() => onSelectBlock(block.block_hash, excerpt)}
+                className="w-full text-left mb-2 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground hover:text-foreground transition-colors line-clamp-1"
+              >
+                {excerpt}
+                {block.raw_content.trim().length > 80 && '…'}
+              </button>
+              {/* 该段的所有评论 */}
+              <div className="space-y-2">
+                {gc.map(c => (
+                  <div key={c.id} className="flex gap-2 items-start">
+                    <div
+                      className={cn(
+                        'w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-medium shrink-0',
+                        ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'][
+                          (c.username?.charCodeAt(0) ?? 0) % 6
+                        ],
+                      )}
+                    >
+                      {(c.username ?? '匿').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-1.5 mb-0.5">
+                        <span className="text-xs font-medium">{c.username ?? '匿名用户'}</span>
+                        <span className="text-xs text-muted-foreground">{timeAgo(c.created_at)}</span>
+                      </div>
+                      {c.selected_text && (
+                        <div className="mb-1 pl-2 border-l border-muted-foreground/30 text-xs text-muted-foreground line-clamp-1">
+                          {c.selected_text}
+                        </div>
+                      )}
+                      <p className="text-sm leading-relaxed break-words">{c.content}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function DocumentPage() {
@@ -195,6 +273,17 @@ export default function DocumentPage() {
         open={showComments}
         onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusBlockHash(null); }}
         focusBlockHash={focusBlockHash}
+      />
+
+      {/* 本章全部评论 */}
+      <ChapterComments
+        chapterBlocks={chapterBlocks}
+        comments={commentsData?.comments ?? []}
+        onSelectBlock={(hash, text) => {
+          setSelectedBlock({ hash, text });
+          setFocusBlockHash(null);
+          setShowComments(true);
+        }}
       />
 
       {/* 底部翻章按钮 */}

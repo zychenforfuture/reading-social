@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type Comment, cn } from '../lib/utils';
+import { api, type Comment, cn, timeAgo } from '../lib/utils';
 import { X, ThumbsUp, MessageSquare, Send } from 'lucide-react';
 
 interface CommentPanelProps {
@@ -12,18 +12,6 @@ interface CommentPanelProps {
   open: boolean;
   onClose: () => void;
   focusBlockHash?: string | null;
-}
-
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return '刚刚';
-  if (m < 60) return `${m} 分钟前`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
-  return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 }
 
 function Avatar({ name }: { name: string }) {
@@ -48,7 +36,6 @@ export default function CommentPanel({
   const queryClient = useQueryClient();
   const [newComment, setNewComment] = useState('');
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
-  const [showAll, setShowAll] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -58,9 +45,8 @@ export default function CommentPanel({
     }
   }, [selectedBlock, open]);
 
-  // 切换焦点段落时重置 showAll 并滚动到顶部
+  // 切换焦点段落时滚动到顶部
   useEffect(() => {
-    setShowAll(false);
     listRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }, [focusBlockHash]);
 
@@ -116,7 +102,9 @@ export default function CommentPanel({
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
             <span className="font-semibold text-sm">评论</span>
             <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
-              {comments.length} 条
+              {focusBlockHash
+                ? `${comments.filter(c => c.block_hash === focusBlockHash).length} 条`
+                : `${comments.length} 条`}
             </span>
           </div>
           <button
@@ -136,8 +124,11 @@ export default function CommentPanel({
               <p className="text-xs opacity-60">选中文字后点击「评论」</p>
             </div>
           ) : (() => {
-            const focusComments = focusBlockHash ? comments.filter(c => c.block_hash === focusBlockHash) : [];
-            const otherComments = focusBlockHash ? comments.filter(c => c.block_hash !== focusBlockHash) : comments;
+            // focusBlockHash 模式：只显示该块的评论
+            const displayComments = focusBlockHash
+              ? comments.filter(c => c.block_hash === focusBlockHash)
+              : comments;
+
             const renderComment = (comment: Comment, highlighted = false) => (
               <div
                 key={comment.id}
@@ -187,45 +178,24 @@ export default function CommentPanel({
                 </div>
               </div>
             );
+
             return (
               <div className="divide-y">
-                {/* 焦点段落评论 置顶高亮 */}
-                {focusComments.length > 0 && (
-                  <>
-                    <div className="px-4 py-1.5 bg-orange-50 dark:bg-orange-900/20 flex items-center justify-between">
-                      <span className="text-xs font-medium text-orange-600">此段评论 {focusComments.length} 条</span>
-                      {otherComments.length > 0 && (
-                        <button
-                          onClick={() => setShowAll(v => !v)}
-                          className="text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          {showAll ? '收起' : `查看全部 ${comments.length} 条`}
-                        </button>
-                      )}
-                    </div>
-                    {focusComments.map(c => renderComment(c, true))}
-                    {otherComments.length > 0 && !showAll && (
-                      <div className="px-4 py-2 text-center">
-                        <button
-                          onClick={() => setShowAll(true)}
-                          className="text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          查看全部 {comments.length} 条评论
-                        </button>
-                      </div>
-                    )}
-                    {showAll && otherComments.length > 0 && (
-                      <>
-                        <div className="px-4 py-1.5 bg-muted/40">
-                          <span className="text-xs text-muted-foreground">其他评论</span>
-                        </div>
-                        {otherComments.map(c => renderComment(c, false))}
-                      </>
-                    )}
-                  </>
+                {focusBlockHash && (
+                  <div className="px-4 py-1.5 bg-orange-50 dark:bg-orange-900/20">
+                    <span className="text-xs font-medium text-orange-600">
+                      此段评论 {displayComments.length} 条
+                    </span>
+                  </div>
                 )}
-                {/* 无焦点时显示全部 */}
-                {focusComments.length === 0 && otherComments.map(c => renderComment(c, false))}
+                {displayComments.length === 0 && focusBlockHash ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+                    <MessageSquare className="h-6 w-6 opacity-30" />
+                    <p className="text-sm">此段暂无评论</p>
+                  </div>
+                ) : (
+                  displayComments.map(c => renderComment(c, !!focusBlockHash))
+                )}
               </div>
             );
           })()}
