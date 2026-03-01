@@ -1,11 +1,12 @@
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useState, useMemo, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, BookOpen, MessageSquare } from 'lucide-react';
+import { ChevronLeft, ChevronRight, BookOpen, MessageSquare, ThumbsUp } from 'lucide-react';
 import { api, type ContentBlock, type Comment, timeAgo, cn } from '../lib/utils';
 import Editor from '../components/Editor';
-import CommentPanel from '../components/CommentPanel';
+import CommentPanel, { Avatar, ReplySection } from '../components/CommentPanel';
 import TableOfContents, { type Chapter } from '../components/TableOfContents';
+import { useUserStore } from '../stores/userStore';
 
 // 章节标题检测正则
 const CHAPTER_RE = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+)/i;
@@ -58,6 +59,7 @@ function buildChapters(blocks: ContentBlock[], blockCommentCount: Record<string,
 
 // -------- 本章评论区（页面底部内联展示）--------
 interface ChapterCommentsProps {
+  documentId: string;
   chapterBlocks: ContentBlock[];
   comments: Comment[];
   onSelectBlock: (hash: string, text: string) => void;
@@ -66,10 +68,54 @@ interface ChapterCommentsProps {
   highlightedBlockHash?: string | null;
 }
 
-function ChapterComments({ chapterBlocks, comments, onSelectBlock, onHoverBlock, onLeaveBlock, highlightedBlockHash }: ChapterCommentsProps) {
+function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock, onHoverBlock, onLeaveBlock, highlightedBlockHash }: ChapterCommentsProps) {
+  const queryClient = useQueryClient();
+  const { user } = useUserStore();
   const blockHashSet = new Set(chapterBlocks.map(b => b.block_hash));
   const chapterComments = comments.filter(c => blockHashSet.has(c.block_hash));
   if (chapterComments.length === 0) return null;
+
+  type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
+
+  // 点赞（乐观更新 + 快照回滚）
+  const likeMutation = useMutation({
+    mutationFn: (commentId: string) => api.likeComment(commentId),
+    onMutate: async (commentId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['document-comments', documentId] });
+      const previous = queryClient.getQueryData<CommentsCache>(['document-comments', documentId]);
+      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          comments: old.comments.map((c) =>
+            c.id === commentId
+              ? { ...c, liked_by_me: !c.liked_by_me, like_count: c.liked_by_me ? c.like_count - 1 : c.like_count + 1 }
+              : c
+          ),
+        };
+      });
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(['document-comments', documentId], context.previous);
+    },
+    onSuccess: (data, commentId) => {
+      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          comments: old.comments.map((c) =>
+            c.id === commentId ? { ...c, liked_by_me: data.liked, like_count: data.likeCount } : c
+          ),
+        };
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteComment(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] }),
+  });
 
   // 按 block 顺序分组
   const groups: { block: ContentBlock; comments: Comment[] }[] = [];
@@ -91,7 +137,7 @@ function ChapterComments({ chapterBlocks, comments, onSelectBlock, onHoverBlock,
         {groups.map(({ block, comments: gc }) => {
           const excerpt = block.raw_content.split('\n')[0]?.trim().slice(0, 80) ?? '';
 
-          // 按 selected_text 二级分组，保持首次出现顺序
+          // 按 selected_text 二级分组
           const textGroupMap = new Map<string, Comment[]>();
           for (const c of gc) {
             const key = c.selected_text?.trim() ?? '';
@@ -105,9 +151,7 @@ function ChapterComments({ chapterBlocks, comments, onSelectBlock, onHoverBlock,
               key={block.block_hash}
               className={cn(
                 'px-4 py-3 transition-colors duration-200',
-                block.block_hash === highlightedBlockHash
-                  ? 'bg-orange-50 dark:bg-orange-900/20'
-                  : '',
+                block.block_hash === highlightedBlockHash ? 'bg-orange-50 dark:bg-orange-900/20' : '',
               )}
               onMouseEnter={() => onHoverBlock?.(block.block_hash)}
               onMouseLeave={() => onLeaveBlock?.()}
@@ -117,40 +161,51 @@ function ChapterComments({ chapterBlocks, comments, onSelectBlock, onHoverBlock,
                 onClick={() => onSelectBlock(block.block_hash, excerpt)}
                 className="w-full text-left mb-3 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground hover:text-foreground transition-colors line-clamp-1"
               >
-                {excerpt}
-                {block.raw_content.trim().length > 80 && '…'}
+                {excerpt}{block.raw_content.trim().length > 80 && '…'}
               </button>
 
               {/* 按引用文字分组 */}
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {Array.from(textGroupMap.entries()).map(([key, groupComments]) => (
                   <div key={key || '__no_text__'}>
-                    {/* 共享引用文字：只显示一次 */}
                     {key && (
-                      <div className="mb-2 pl-2 border-l-2 border-muted-foreground/20 text-xs text-muted-foreground line-clamp-2">
+                      <div className="mb-2 pl-2 border-l-2 border-orange-200 text-xs text-muted-foreground/80 italic line-clamp-2">
                         {key}
                       </div>
                     )}
-                    {/* 该引用下的所有评论 */}
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {groupComments.map(c => (
-                        <div key={c.id} className="flex gap-2 items-start">
-                          <div
-                            className={cn(
-                              'w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-medium shrink-0',
-                              ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'][
-                                (c.username?.charCodeAt(0) ?? 0) % 6
-                              ],
-                            )}
-                          >
-                            {(c.username ?? '匿').charAt(0).toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-baseline gap-1.5 mb-0.5">
-                              <span className="text-xs font-medium">{c.username ?? '匿名用户'}</span>
-                              <span className="text-xs text-muted-foreground">{timeAgo(c.created_at)}</span>
+                        <div key={c.id} className="group">
+                          <div className="flex gap-2.5">
+                            <Avatar name={c.username || '匿名'} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-2 mb-0.5">
+                                <span className="text-sm font-medium truncate">{c.username || '匿名用户'}</span>
+                                <span className="text-xs text-muted-foreground shrink-0">{timeAgo(c.created_at)}</span>
+                              </div>
+                              <p className="text-sm text-foreground leading-relaxed break-words">{c.content}</p>
+                              <div className="flex items-center gap-3 mt-2">
+                                <button
+                                  onClick={() => likeMutation.mutate(c.id)}
+                                  className={cn(
+                                    'flex items-center gap-1 text-xs transition-colors',
+                                    c.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
+                                  )}
+                                >
+                                  <ThumbsUp className={cn('h-3 w-3', c.liked_by_me && 'fill-current')} />
+                                  {c.like_count > 0 && <span>{c.like_count}</span>}
+                                </button>
+                                {(user?.is_admin || c.user_id === user?.id) && (
+                                  <button
+                                    onClick={() => deleteMutation.mutate(c.id)}
+                                    className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                                  >
+                                    删除
+                                  </button>
+                                )}
+                              </div>
+                              <ReplySection comment={c} documentId={documentId} currentUser={user} />
                             </div>
-                            <p className="text-sm leading-relaxed break-words">{c.content}</p>
                           </div>
                         </div>
                       ))}
@@ -412,6 +467,7 @@ export default function DocumentPage() {
 
       {/* 本章全部评论 */}
       <ChapterComments
+        documentId={id!}
         chapterBlocks={chapterBlocks}
         comments={commentsData?.comments ?? []}
         highlightedBlockHash={highlightedBlockHash}

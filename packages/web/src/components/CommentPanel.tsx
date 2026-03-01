@@ -15,7 +15,7 @@ interface CommentPanelProps {
   focusCommentIds?: string[] | null;
 }
 
-function Avatar({ name }: { name: string }) {
+export function Avatar({ name }: { name: string }) {
   const colors = ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'];
   const color = colors[(name.charCodeAt(0) || 0) % colors.length];
   return (
@@ -36,7 +36,7 @@ function SmallAvatar({ name }: { name: string }) {
 }
 
 // ─── 回复区域（内联展开，每条根评论下方）────────────────────────────
-function ReplySection({
+export function ReplySection({
   comment,
   documentId,
   currentUser,
