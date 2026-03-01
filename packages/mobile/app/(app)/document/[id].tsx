@@ -15,7 +15,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { documents, comments } from '../../../lib/api';
 import { useAuthStore } from '../../../lib/store';
-import type { Block, Comment } from '../../../lib/api';
+import type { Block, Comment, CommentWithReplies } from '../../../lib/api';
 import CommentItem from '../../../components/CommentItem';
 
 export default function DocumentPage() {
@@ -33,14 +33,14 @@ export default function DocumentPage() {
     queryFn: () => documents.get(docId),
   });
 
-  const { data: blockComments = [] } = useQuery<Comment[]>({
+  const { data: blockComments = [] } = useQuery<CommentWithReplies[]>({
     queryKey: ['comments', selectedBlock?.hash],
     queryFn: () => comments.getByBlock(selectedBlock!.hash),
     enabled: !!selectedBlock,
   });
 
   const createMutation = useMutation({
-    mutationFn: (body: { block_hash: string; content: string; parent_id?: number; root_id?: number }) =>
+    mutationFn: (body: { blockHash: string; content: string; rootId?: string; replyToUserId?: string }) =>
       comments.create(body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['comments', selectedBlock?.hash] });
@@ -53,18 +53,20 @@ export default function DocumentPage() {
   const handleSubmitComment = () => {
     if (!commentText.trim() || !selectedBlock) return;
     const body: any = {
-      block_hash: selectedBlock.hash,
+      blockHash: selectedBlock.hash,
       content: commentText.trim(),
     };
     if (replyTo) {
-      body.parent_id = replyTo.id;
-      body.root_id = replyTo.root_id ?? replyTo.id;
+      body.rootId = replyTo.root_id ?? replyTo.id;
     }
     createMutation.mutate(body);
   };
 
   const renderBlock = (block: Block) => {
     const isHeading = block.type === 'heading';
+    const displayContent = isHeading
+      ? block.content.replace(/^#{1,6}\s+/, '')
+      : block.content;
     const fontSize = isHeading
       ? block.heading_level === 1 ? 22 : block.heading_level === 2 ? 19 : 17
       : 15;
@@ -77,7 +79,7 @@ export default function DocumentPage() {
         activeOpacity={0.7}
       >
         <Text style={[styles.blockText, { fontSize, fontWeight: isHeading ? '700' : '400' }]}>
-          {block.content}
+          {displayContent}
         </Text>
       </TouchableOpacity>
     );
@@ -143,8 +145,8 @@ export default function DocumentPage() {
 
             {/* Comments list */}
             <FlatList
-              data={blockComments.filter((c) => !c.parent_id)}
-              keyExtractor={(item) => String(item.id)}
+              data={blockComments}
+              keyExtractor={(item) => item.id}
               style={styles.commentsList}
               renderItem={({ item }) => (
                 <CommentItem

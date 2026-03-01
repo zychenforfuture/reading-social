@@ -52,8 +52,23 @@ export const auth = {
 
 // Documents
 export const documents = {
-  list: () => request<Document[]>('/documents'),
-  get: (id: number) => request<DocumentDetail>(`/documents/${id}`),
+  list: () =>
+    request<{ documents: Document[] }>('/documents').then((r) => r.documents),
+  get: (id: number) =>
+    request<{ document: Document; content: RawBlock[] }>(`/documents/${id}`).then(
+      (r) => ({
+        ...r.document,
+        blocks: (r.content || []).map((b, i) => ({
+          id: i,
+          hash: b.block_hash,
+          type: detectBlockType(b.raw_content),
+          content: b.raw_content,
+          order_index: i,
+          heading_level: getHeadingLevel(b.raw_content),
+          word_count: b.word_count,
+        })),
+      }) as DocumentDetail
+    ),
   upload: async (formData: FormData) => {
     const token = await getToken();
     const res = await fetch(`${BASE_URL}/documents`, {
@@ -65,32 +80,42 @@ export const documents = {
       const err = await res.json().catch(() => ({ message: res.statusText }));
       throw new Error(err.message || 'Upload failed');
     }
-    return res.json() as Promise<Document>;
+    return res.json() as Promise<{ document: Document }>;
   },
 };
+
+function detectBlockType(content: string): string {
+  if (/^#{1,6}\s/.test(content)) return 'heading';
+  return 'paragraph';
+}
+
+function getHeadingLevel(content: string): number | undefined {
+  const m = content.match(/^(#{1,6})\s/);
+  return m ? m[1].length : undefined;
+}
 
 // Comments
 export const comments = {
   getByBlock: (hash: string) =>
-    request<Comment[]>(`/comments/block/${hash}`),
+    request<{ comments: CommentWithReplies[] }>(`/comments/block/${hash}`).then(
+      (r) => r.comments
+    ),
   create: (body: {
-    block_hash: string;
+    blockHash: string;
     content: string;
-    parent_id?: number;
-    root_id?: number;
+    rootId?: string;
+    replyToUserId?: string;
   }) =>
-    request<Comment>('/comments', {
+    request<{ comment: Comment }>('/comments', {
       method: 'POST',
       body: JSON.stringify(body),
-    }),
-  like: (id: number) =>
-    request<{ liked: boolean; count: number }>(`/comments/${id}/like`, {
+    }).then((r) => r.comment),
+  like: (id: string) =>
+    request<{ liked: boolean; likeCount: number }>(`/comments/${id}/like`, {
       method: 'POST',
     }),
-  delete: (id: number) =>
+  delete: (id: string) =>
     request<{ message: string }>(`/comments/${id}`, { method: 'DELETE' }),
-  getReplies: (rootId: number) =>
-    request<Comment[]>(`/comments/${rootId}/replies`),
 };
 
 // Types
@@ -104,9 +129,18 @@ export interface User {
 export interface Document {
   id: number;
   title: string;
-  author: string;
-  created_at: string;
+  author?: string;
+  word_count?: number;
   block_count?: number;
+  status?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface RawBlock {
+  block_hash: string;
+  raw_content: string;
+  word_count?: number;
 }
 
 export interface Block {
@@ -116,6 +150,7 @@ export interface Block {
   content: string;
   order_index: number;
   heading_level?: number;
+  word_count?: number;
 }
 
 export interface DocumentDetail extends Document {
@@ -123,15 +158,19 @@ export interface DocumentDetail extends Document {
 }
 
 export interface Comment {
-  id: number;
+  id: string;
   block_hash: string;
-  user_id: number;
+  user_id: string;
   username: string;
   content: string;
-  parent_id: number | null;
-  root_id: number | null;
+  parent_comment_id: string | null;
+  root_id: string | null;
+  reply_to_user_id: string | null;
   like_count: number;
-  is_liked: boolean;
   reply_count: number;
   created_at: string;
+}
+
+export interface CommentWithReplies extends Comment {
+  replies?: Comment[];
 }

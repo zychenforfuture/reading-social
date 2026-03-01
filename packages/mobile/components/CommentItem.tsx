@@ -5,39 +5,37 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  FlatList,
 } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { comments } from '../lib/api';
 import { useAuthStore } from '../lib/store';
-import type { Comment } from '../lib/api';
+import type { Comment, CommentWithReplies } from '../lib/api';
 
 interface Props {
-  comment: Comment;
+  comment: CommentWithReplies;
   onReply: (comment: Comment) => void;
   blockHash: string;
 }
 
 export default function CommentItem({ comment, onReply, blockHash }: Props) {
   const [showReplies, setShowReplies] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(comment.like_count ?? 0);
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
 
   const likeMutation = useMutation({
     mutationFn: () => comments.like(comment.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['comments', blockHash] }),
+    onSuccess: (data) => {
+      setLiked(data.liked);
+      setLikeCount(data.likeCount);
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => comments.delete(comment.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['comments', blockHash] }),
     onError: (e: any) => Alert.alert('删除失败', e.message),
-  });
-
-  const { data: replies = [] } = useQuery<Comment[]>({
-    queryKey: ['replies', comment.id],
-    queryFn: () => comments.getReplies(comment.id),
-    enabled: showReplies,
   });
 
   const handleDelete = () => {
@@ -57,11 +55,13 @@ export default function CommentItem({ comment, onReply, blockHash }: Props) {
     return `${Math.floor(h / 24)}天前`;
   };
 
+  const replies = comment.replies || [];
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{comment.username[0].toUpperCase()}</Text>
+          <Text style={styles.avatarText}>{(comment.username || '?')[0].toUpperCase()}</Text>
         </View>
         <View style={styles.meta}>
           <Text style={styles.username}>{comment.username}</Text>
@@ -77,8 +77,8 @@ export default function CommentItem({ comment, onReply, blockHash }: Props) {
           onPress={() => likeMutation.mutate()}
           disabled={likeMutation.isPending}
         >
-          <Text style={[styles.actionText, comment.is_liked && styles.liked]}>
-            {comment.is_liked ? '❤️' : '🤍'} {comment.like_count}
+          <Text style={[styles.actionText, liked && styles.liked]}>
+            {liked ? '❤️' : '🤍'} {likeCount}
           </Text>
         </TouchableOpacity>
 
@@ -88,15 +88,15 @@ export default function CommentItem({ comment, onReply, blockHash }: Props) {
           </TouchableOpacity>
         )}
 
-        {comment.reply_count > 0 && (
+        {replies.length > 0 && (
           <TouchableOpacity style={styles.actionBtn} onPress={() => setShowReplies(!showReplies)}>
             <Text style={styles.actionText}>
-              {showReplies ? '收起回复' : `查看 ${comment.reply_count} 条回复`}
+              {showReplies ? '收起回复' : `查看 ${replies.length} 条回复`}
             </Text>
           </TouchableOpacity>
         )}
 
-        {user && user.id === comment.user_id && (
+        {user && user.id === Number(comment.user_id) && (
           <TouchableOpacity style={styles.actionBtn} onPress={handleDelete}>
             <Text style={[styles.actionText, styles.deleteText]}>删除</Text>
           </TouchableOpacity>
@@ -112,11 +112,11 @@ export default function CommentItem({ comment, onReply, blockHash }: Props) {
                 <Text style={styles.replyTime}>{timeAgo(reply.created_at)}</Text>
               </View>
               <Text style={styles.replyContent}>{reply.content}</Text>
-              <TouchableOpacity onPress={() => likeMutation.mutate()}>
-                <Text style={styles.smallAction}>
-                  {reply.is_liked ? '❤️' : '🤍'} {reply.like_count}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.replyActions}>
+                <TouchableOpacity onPress={() => onReply(reply)}>
+                  <Text style={styles.smallAction}>🤍 {reply.like_count ?? 0}  回复</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ))}
         </View>
