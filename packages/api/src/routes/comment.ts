@@ -22,6 +22,15 @@ const router: Router = Router();
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL`);
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_count INTEGER NOT NULL DEFAULT 0`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_root_id ON comments(root_id)`);
+    // 修正存量 reply_count（重新按实际未删除回复数对齐，幂等）
+    await pool.query(`
+      UPDATE comments c
+      SET reply_count = (
+        SELECT COUNT(*) FROM comments r
+        WHERE r.root_id = c.id AND r.is_deleted = false
+      )
+      WHERE c.root_id IS NULL
+    `);
     logger.info('comment_likes migration OK');
   } catch (err) {
     logger.error('comment_likes migration failed:', err);
@@ -334,7 +343,7 @@ router.delete('/:id', async (req, res) => {
 
     // 查评论归属 + 当前用户是否管理员
     const [commentRow, userRow] = await Promise.all([
-      pool.query('SELECT user_id FROM comments WHERE id = $1 AND is_deleted = false', [id]),
+      pool.query('SELECT user_id, root_id FROM comments WHERE id = $1 AND is_deleted = false', [id]),
       pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]),
     ]);
 
@@ -344,15 +353,33 @@ router.delete('/:id', async (req, res) => {
 
     const isAdmin = userRow.rows[0]?.is_admin === true;
     const commentOwnerId = commentRow.rows[0].user_id;
+    const rootId: string | null = commentRow.rows[0].root_id;
 
     if (!isAdmin && commentOwnerId !== userId) {
       return res.status(403).json({ error: 'Cannot delete other users\' comments' });
     }
 
-    await pool.query(
-      "UPDATE comments SET is_deleted = true, content = '[Deleted]' WHERE id = $1",
-      [id]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        "UPDATE comments SET is_deleted = true, content = '[Deleted]' WHERE id = $1",
+        [id]
+      );
+      // 如果是回复，根评论 reply_count -1
+      if (rootId) {
+        await client.query(
+          'UPDATE comments SET reply_count = GREATEST(0, reply_count - 1) WHERE id = $1',
+          [rootId]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
 
     logger.info(`Comment soft deleted: ${id} by user ${userId}`);
     res.json({ message: 'Comment deleted' });
