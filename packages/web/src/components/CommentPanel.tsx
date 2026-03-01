@@ -48,6 +48,7 @@ function ReplySection({
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [showInput, setShowInput] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<{ userId: string; username: string } | null>(null);
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -61,10 +62,11 @@ function ReplySection({
 
   const replyMutation = useMutation({
     mutationFn: (content: string) =>
-      api.createReply(comment.id, content, undefined),
+      api.createReply(comment.id, content, replyingTo?.userId),
     onSuccess: () => {
       setText('');
       setShowInput(false);
+      setReplyingTo(null);
       // 列表和 reply_count 由 SSE new_reply 统一更新，避免发送者本人重复追加
     },
   });
@@ -90,19 +92,44 @@ function ReplySection({
     },
   });
 
-  // SSE new_reply 收到时，追加到缓存（如果已展开）
-  useEffect(() => {
-    // DocumentPage 的 SSE handler 会更新 reply_count，这里只做展开状态下的追加
-  }, []);
+  // 回复点赞（乐观更新）
+  const likeMutation = useMutation({
+    mutationFn: (replyId: string) => api.likeComment(replyId),
+    onMutate: async (replyId: string) => {
+      queryClient.setQueryData(['replies', comment.id], (old: { replies: Comment[] } | undefined) => {
+        if (!old) return old;
+        return {
+          replies: old.replies.map((r) =>
+            r.id === replyId
+              ? { ...r, liked_by_me: !r.liked_by_me, like_count: r.liked_by_me ? r.like_count - 1 : r.like_count + 1 }
+              : r
+          ),
+        };
+      });
+    },
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ['replies', comment.id] });
+    },
+  });
 
   const replyCount = comment.reply_count;
+
+  const startReplyTo = (userId: string, username: string) => {
+    setReplyingTo({ userId, username });
+    setShowInput(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
 
   return (
     <div className="mt-1.5">
       {/* 操作行：回复按钮 + 展开按钮 */}
       <div className="flex items-center gap-3">
         <button
-          onClick={() => { setShowInput(!showInput); if (!showInput) setTimeout(() => inputRef.current?.focus(), 50); }}
+          onClick={() => {
+            setReplyingTo(null);
+            setShowInput(!showInput);
+            if (!showInput) setTimeout(() => inputRef.current?.focus(), 50);
+          }}
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <CornerDownRight className="h-3 w-3" />
@@ -121,28 +148,40 @@ function ReplySection({
 
       {/* 回复输入框 */}
       {showInput && (
-        <div className="mt-2 flex items-end gap-1.5">
-          <textarea
-            ref={inputRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) {
-                replyMutation.mutate(text.trim());
-              }
-              if (e.key === 'Escape') { setShowInput(false); setText(''); }
-            }}
-            rows={2}
-            placeholder="写下回复… (⌘Enter 发送)"
-            className="flex-1 resize-none rounded-md border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <button
-            onClick={() => { if (text.trim()) replyMutation.mutate(text.trim()); }}
-            disabled={!text.trim() || replyMutation.isPending}
-            className="h-7 w-7 shrink-0 rounded-full bg-primary flex items-center justify-center text-primary-foreground disabled:opacity-30"
-          >
-            <Send className="h-3 w-3" />
-          </button>
+        <div className="mt-2 space-y-1">
+          {replyingTo && (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground px-0.5">
+              <CornerDownRight className="h-3 w-3 shrink-0" />
+              回复
+              <span className="font-medium text-foreground">{replyingTo.username}</span>
+              <button onClick={() => setReplyingTo(null)} className="ml-1 hover:text-foreground">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          <div className="flex items-end gap-1.5">
+            <textarea
+              ref={inputRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) {
+                  replyMutation.mutate(text.trim());
+                }
+                if (e.key === 'Escape') { setShowInput(false); setText(''); setReplyingTo(null); }
+              }}
+              rows={2}
+              placeholder={replyingTo ? `回复 ${replyingTo.username}… (⌘Enter 发送)` : '写下回复… (⌘Enter 发送)'}
+              className="flex-1 resize-none rounded-md border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <button
+              onClick={() => { if (text.trim()) replyMutation.mutate(text.trim()); }}
+              disabled={!text.trim() || replyMutation.isPending}
+              className="h-7 w-7 shrink-0 rounded-full bg-primary flex items-center justify-center text-primary-foreground disabled:opacity-30"
+            >
+              <Send className="h-3 w-3" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -162,14 +201,36 @@ function ReplySection({
                   <span className="text-xs text-muted-foreground">{timeAgo(reply.created_at)}</span>
                 </div>
                 <p className="text-xs text-foreground leading-relaxed break-words mt-0.5">{reply.content}</p>
-                {(currentUser?.is_admin || reply.user_id === currentUser?.id) && (
+                <div className="flex items-center gap-3 mt-1">
+                  {/* 点赞 */}
                   <button
-                    onClick={() => deleteMutation.mutate(reply.id)}
-                    className="text-xs text-muted-foreground hover:text-destructive opacity-0 group-hover/reply:opacity-100 transition-colors mt-0.5"
+                    onClick={() => currentUser && likeMutation.mutate(reply.id)}
+                    className={cn(
+                      'flex items-center gap-1 text-xs transition-colors',
+                      reply.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
+                    )}
                   >
-                    删除
+                    <ThumbsUp className="h-3 w-3" />
+                    {reply.like_count > 0 && <span>{reply.like_count}</span>}
                   </button>
-                )}
+                  {/* 回复此回复 */}
+                  <button
+                    onClick={() => startReplyTo(reply.user_id, reply.username || '匿名用户')}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <CornerDownRight className="h-3 w-3" />
+                    回复
+                  </button>
+                  {/* 删除（自己或管理员） */}
+                  {(currentUser?.is_admin || reply.user_id === currentUser?.id) && (
+                    <button
+                      onClick={() => deleteMutation.mutate(reply.id)}
+                      className="text-xs text-muted-foreground hover:text-destructive opacity-0 group-hover/reply:opacity-100 transition-colors"
+                    >
+                      删除
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}

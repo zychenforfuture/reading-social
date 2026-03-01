@@ -120,15 +120,18 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
 router.get('/:id/replies', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = await getUserId(req); // 可为 null
     const result = await pool.query(
       `SELECT c.*, u.username, u.avatar_url,
-              ru.username as reply_to_username
+              ru.username as reply_to_username,
+              CASE WHEN cl.user_id IS NOT NULL THEN true ELSE false END as liked_by_me
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
        LEFT JOIN users ru ON ru.id = c.reply_to_user_id
+       LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $2
        WHERE c.root_id = $1 AND c.is_deleted = false
        ORDER BY c.created_at ASC`,
-      [id]
+      [id, userId ?? null]
     );
     res.json({ replies: result.rows });
   } catch (error) {
