@@ -5,50 +5,30 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// 忽略 TypeScript 严格空检查错误
-// @ts-ignore - 生产环境构建配置问题
-export const api: {
-  baseURL: string;
-  request<T>(endpoint: string, options?: RequestInit): Promise<T>;
-  login: (email: string, password: string) => Promise<{ token: string; user: User }>;
-  register: (email: string, username: string, password: string, code: string) => Promise<{ message: string }>;
-  sendCode: (email: string, purpose: 'register' | 'reset_password') => Promise<{ message: string }>;
-  resetPassword: (email: string, code: string, password: string) => Promise<{ message: string }>;
-  getDocuments: () => Promise<{ documents: Document[] }>;
-  getDocument: (id: string) => Promise<{ document: Document; content: ContentBlock[] }>;
-  getDocumentComments: (id: string) => Promise<{ comments: Comment[]; blockCommentCount: Record<string, number> }>;
-  createDocument: (title: string, content: string) => Promise<{ document: Document }>;
-  deleteDocument: (id: string) => Promise<unknown>;
-  getBlockComments: (hash: string) => Promise<{ comments: (Comment & { replies?: Comment[] })[] }>;
-  createComment: (blockHash: string, content: string, parentCommentId?: string, selectedText?: string) => Promise<{ comment: Comment }>;
-  createReply: (rootId: string, content: string, replyToUserId?: string) => Promise<{ comment: Comment }>;
-  getReplies: (rootId: string) => Promise<{ replies: Comment[] }>;
-  updateComment: (id: string, updates: Partial<{ content: string; isResolved: boolean }>) => Promise<{ comment: Comment }>;
-  deleteComment: (id: string) => Promise<unknown>;
-  likeComment: (id: string) => Promise<{ liked: boolean; likeCount: number }>;
-  getBlock: (hash: string) => Promise<{ block?: ContentBlock; documents?: Document[] }>;
-  getBlockSimilar: (hash: string) => Promise<{ similar?: SimilarBlock[] }>;
-} = {
+/** 从 zustand-persist 的 localStorage 中读取当前 token */
+function getStoredToken(): string | null {
+  try {
+    const raw = localStorage.getItem('collab-auth');
+    if (!raw) return null;
+    return (JSON.parse(raw) as { state?: { token?: string } })?.state?.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export const api = {
   // @ts-ignore - Vite 环境变量
-  baseURL: import.meta.env?.VITE_API_URL || '/api',
+  baseURL: (import.meta.env?.VITE_API_URL || '/api') as string,
 
   async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    // 从 localStorage 读取持久化的 token
-    let token: string | null = null;
-    try {
-      const stored = localStorage.getItem('collab-auth');
-      if (stored) token = JSON.parse(stored)?.state?.token ?? null;
-    } catch {}
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string>),
-    };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
+    const token = getStoredToken();
     const response = await fetch(`${api.baseURL}${endpoint}`, {
       ...options,
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
     });
 
     if (!response.ok) {
@@ -56,10 +36,10 @@ export const api: {
       throw new Error(error?.error || `HTTP ${response.status}`);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   },
 
-  // Auth
+  // ── Auth ──────────────────────────────────────────────────────────────────
   login: (email: string, password: string) =>
     api.request<{ token: string; user: User }>('/auth/login', {
       method: 'POST',
@@ -84,11 +64,14 @@ export const api: {
       body: JSON.stringify({ email, code, password }),
     }),
 
-  // Documents
+  // ── Documents ─────────────────────────────────────────────────────────────
   getDocuments: () => api.request<{ documents: Document[] }>('/documents'),
-  getDocument: (id: string) => api.request<{ document: Document; content: ContentBlock[] }>(`/documents/${id}`),
+  getDocument: (id: string) =>
+    api.request<{ document: Document; content: ContentBlock[] }>(`/documents/${id}`),
   getDocumentComments: (id: string) =>
-    api.request<{ comments: Comment[]; blockCommentCount: Record<string, number> }>(`/documents/${id}/comments`),
+    api.request<{ comments: Comment[]; blockCommentCount: Record<string, number> }>(
+      `/documents/${id}/comments`,
+    ),
   createDocument: (title: string, content: string) =>
     api.request<{ document: Document }>('/documents', {
       method: 'POST',
@@ -97,21 +80,23 @@ export const api: {
   deleteDocument: (id: string) =>
     api.request<unknown>(`/documents/${id}`, { method: 'DELETE' }),
 
-  // Comments
+  // ── Comments ──────────────────────────────────────────────────────────────
   getBlockComments: (hash: string) =>
-    api.request<{ comments: (Comment & { replies?: Comment[] })[] }>(`/comments/block/${hash}`),
-  createComment: (blockHash: string, content: string, _parentCommentId?: string, selectedText?: string) =>
-    api.request<{ comment: Comment }>('/comments', {
-      method: 'POST',
-      body: JSON.stringify({ blockHash, content, selectedText }),
-    }),
-  createReply: (rootId: string, content: string, replyToUserId?: string) =>
-    api.request<{ comment: Comment }>('/comments', {
-      method: 'POST',
-      body: JSON.stringify({ rootId, content, replyToUserId }),
-    }),
+    api.request<{ comments: Comment[] }>(`/comments/block/${hash}`),
   getReplies: (rootId: string) =>
     api.request<{ replies: Comment[] }>(`/comments/${rootId}/replies`),
+  createComment: (
+    blockHash: string,
+    content: string,
+    parentCommentId?: string,
+    selectedText?: string,
+    rootId?: string,
+    replyToUserId?: string,
+  ) =>
+    api.request<{ comment: Comment }>('/comments', {
+      method: 'POST',
+      body: JSON.stringify({ blockHash, content, parentCommentId, selectedText, rootId, replyToUserId }),
+    }),
   updateComment: (id: string, updates: Partial<{ content: string; isResolved: boolean }>) =>
     api.request<{ comment: Comment }>(`/comments/${id}`, {
       method: 'PATCH',
@@ -120,10 +105,13 @@ export const api: {
   deleteComment: (id: string) =>
     api.request<unknown>(`/comments/${id}`, { method: 'DELETE' }),
   likeComment: (id: string) =>
-    api.request<{ liked: boolean; likeCount: number }>(`/comments/${id}/like`, { method: 'POST' }),
+    api.request<{ liked: boolean; likeCount: number }>(`/comments/${id}/like`, {
+      method: 'POST',
+    }),
 
-  // Blocks
-  getBlock: (hash: string) => api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),
+  // ── Blocks ────────────────────────────────────────────────────────────────
+  getBlock: (hash: string) =>
+    api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),
   getBlockSimilar: (hash: string) =>
     api.request<{ similar?: SimilarBlock[] }>(`/blocks/${hash}/similar`),
 };
@@ -144,7 +132,7 @@ export type Document = {
   status: 'processing' | 'ready' | 'error';
   created_at: string;
   updated_at: string;
-  uploader?: string;  // 仅管理员可见
+  uploader?: string;
 };
 
 export type ContentBlock = {
@@ -157,18 +145,17 @@ export type ContentBlock = {
 export type Comment = {
   id: string;
   block_hash: string;
-  user_id: string;
+  user_id: string | null;
   content: string;
   username?: string;
   avatar_url?: string;
   selected_text?: string;
   is_resolved: boolean;
-  like_count: number;
-  liked_by_me: boolean;
-  reply_count: number;
+  like_count?: number;
+  liked_by_me?: boolean;
+  reply_count?: number;
+  reply_to_username?: string;
   root_id?: string | null;
-  reply_to_user_id?: string | null;
-  reply_to_username?: string | null;
   created_at: string;
   updated_at: string;
   replies?: Comment[];

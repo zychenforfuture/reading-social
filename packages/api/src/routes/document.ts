@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { documentQueue } from '../config/queue.js';
 
 const router: Router = Router();
 
@@ -12,51 +11,37 @@ const uploadSchema = z.object({
   content: z.string(),
 });
 
-// 从 Authorization header 解析当前登录用户信息
-async function getCallerInfo(req: Request): Promise<{ userId: string | null; isAdmin: boolean }> {
+/** 从 Authorization header 解析当前用户 ID（与 comment 路由一致） */
+async function getUserId(req: Request): Promise<string | null> {
   const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer dummy_token_')) {
-    return { userId: null, isAdmin: false };
-  }
+  if (!auth || !auth.startsWith('Bearer dummy_token_')) return null;
   const userId = auth.replace('Bearer dummy_token_', '');
   try {
-    const r = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
-    if (r.rows.length === 0) return { userId: null, isAdmin: false };
-    return { userId, isAdmin: r.rows[0].is_admin === true };
+    const r = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    return r.rows.length > 0 ? userId : null;
   } catch {
-    return { userId: null, isAdmin: false };
+    return null;
   }
 }
 
-// 列出用户文档
+// 列出文档（公共，按时间倒序；管理员看到上传者信息）
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { userId, isAdmin } = await getCallerInfo(req);
-
-    let result;
-    if (isAdmin) {
-      // 管理员看所有文档
-      result = await pool.query(
-        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
-                u.username as uploader
-         FROM documents d
-         LEFT JOIN users u ON d.user_id = u.id
-         ORDER BY d.created_at DESC`
-      );
-    } else if (userId) {
-      // 普通用户只看自己的
-      result = await pool.query(
-        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
-                u.username as uploader
-         FROM documents d
-         LEFT JOIN users u ON d.user_id = u.id
-         WHERE d.user_id = $1
-         ORDER BY d.created_at DESC`,
-        [userId]
-      );
-    } else {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const userId = await getUserId(req);
+    let isAdmin = false;
+    if (userId) {
+      const r = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
+      isAdmin = r.rows[0]?.is_admin === true;
     }
+
+    const result = await pool.query(
+      `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
+              d.user_id,
+              ${isAdmin ? 'u.username AS uploader' : 'NULL::text AS uploader'}
+       FROM documents d
+       LEFT JOIN users u ON d.user_id = u.id
+       ORDER BY d.created_at DESC`,
+    );
 
     res.json({ documents: result.rows });
   } catch (error) {
@@ -66,7 +51,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // 获取单个文档
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -77,7 +62,7 @@ router.get('/:id', async (req, res) => {
        LEFT JOIN document_blocks db ON d.id = db.document_id
        WHERE d.id = $1
        GROUP BY d.id`,
-      [id]
+      [id],
     );
 
     if (result.rows.length === 0) {
@@ -89,12 +74,11 @@ router.get('/:id', async (req, res) => {
     // 获取内容块
     const blocksResult = await pool.query(
       'SELECT block_hash, raw_content, word_count FROM content_blocks WHERE block_hash = ANY($1)',
-      [doc.block_hashes]
+      [doc.block_hashes],
     );
 
-    const blocksMap = new Map(blocksResult.rows.map(b => [b.block_hash, b]));
+    const blocksMap = new Map(blocksResult.rows.map((b) => [b.block_hash, b]));
 
-    // 构建带内容的文档
     const content = doc.block_hashes
       .filter((h: string) => blocksMap.has(h))
       .map((h: string) => blocksMap.get(h));
@@ -117,42 +101,45 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// 获取文档评论分布
-router.get('/:id/comments', async (req, res) => {
+// 获取文档评论分布（包含 like_count、liked_by_me、root_id）
+router.get('/:id/comments', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = await getUserId(req);
 
-    // 获取文档的所有块
     const blocksResult = await pool.query(
       'SELECT block_hash FROM document_blocks WHERE document_id = $1',
-      [id]
+      [id],
     );
 
-    const blockHashes = blocksResult.rows.map(r => r.block_hash);
+    const blockHashes = blocksResult.rows.map((r) => r.block_hash);
 
     if (blockHashes.length === 0) {
       return res.json({ comments: [], blockCommentCount: {} });
     }
 
-    // 获取这些块的所有评论（含 like_count、liked_by_me）—— 只拉根评论
-    const { userId } = await getCallerInfo(req);
     const commentsResult = await pool.query(
-      `SELECT c.*, u.username, u.avatar_url,
-              c.like_count,
-              c.reply_count,
-              CASE WHEN cl.user_id IS NOT NULL THEN true ELSE false END as liked_by_me
+      `SELECT c.id, c.block_hash, c.user_id, c.content, c.selected_text,
+              c.is_resolved, c.like_count, c.reply_count,
+              c.root_id, c.reply_to_user_id, c.created_at, c.updated_at,
+              u.username, u.avatar_url,
+              ru.username AS reply_to_username,
+              CASE WHEN cl.user_id IS NOT NULL THEN true ELSE false END AS liked_by_me
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
+       LEFT JOIN users ru ON ru.id = c.reply_to_user_id
        LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $2
-       WHERE c.block_hash = ANY($1) AND c.root_id IS NULL AND c.is_deleted = false
+       WHERE c.block_hash = ANY($1) AND c.is_deleted = false
        ORDER BY c.created_at ASC`,
-      [blockHashes, userId]
+      [blockHashes, userId ?? null],
     );
 
-    // 统计每个块的评论数
+    // 只有根评论（root_id IS NULL）计入 blockCommentCount
     const blockCommentCount: Record<string, number> = {};
     for (const hash of blockHashes) {
-      blockCommentCount[hash] = commentsResult.rows.filter(c => c.block_hash === hash).length;
+      blockCommentCount[hash] = commentsResult.rows.filter(
+        (c) => c.block_hash === hash && !c.root_id,
+      ).length;
     }
 
     res.json({
@@ -169,21 +156,15 @@ router.get('/:id/comments', async (req, res) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { title, content } = uploadSchema.parse(req.body);
+    const userId = await getUserId(req);
 
-    // 从 Authorization header 获取用户 ID
-    const { userId } = await getCallerInfo(req);
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // 计算文件哈希 (用于秒传)
     const crypto = await import('crypto');
     const fileHash = crypto.createHash('md5').update(content).digest('hex');
 
-    // 检查是否已存在相同文件（同一用户）
+    // 秒传：同一用户+同一文件哈希
     const existing = await pool.query(
-      'SELECT id FROM documents WHERE file_hash = $1 AND user_id = $2',
-      [fileHash, userId]
+      'SELECT id FROM documents WHERE file_hash = $1 AND user_id IS NOT DISTINCT FROM $2',
+      [fileHash, userId],
     );
 
     if (existing.rows.length > 0) {
@@ -194,27 +175,49 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    // 创建文档记录
     const docResult = await pool.query(
       'INSERT INTO documents (user_id, title, file_hash, status, content) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at',
-      [userId, title, fileHash, 'processing', content]
+      [userId, title, fileHash, 'processing', content],
     );
 
     const docId = docResult.rows[0].id;
 
-    // 将处理任务推入 BullMQ 队列，立即返回给前端
-    // 只传 documentId，content 已存 DB，worker 直接读取避免大文本进 Redis
-    await documentQueue.add('process-document', { documentId: docId });
+    const blocks = content
+      .split(/\r?\n/)
+      .map((p: string) => p.trim())
+      .filter((p: string) => p.length > 0);
 
-    logger.info(`Document queued for processing: ${docId}`);
+    for (let i = 0; i < blocks.length; i++) {
+      const blockContent = blocks[i]!.trim();
+      const blockHash = crypto.createHash('sha256').update(blockContent).digest('hex');
+
+      await pool.query(
+        `INSERT INTO content_blocks (block_hash, raw_content, normalized_content, word_count)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (block_hash) DO UPDATE SET occurrence_count = content_blocks.occurrence_count + 1`,
+        [blockHash, blockContent, blockContent, blockContent.length],
+      );
+
+      await pool.query(
+        'INSERT INTO document_blocks (document_id, block_hash, sequence_order) VALUES ($1, $2, $3)',
+        [docId, blockHash, i],
+      );
+    }
+
+    await pool.query(
+      'UPDATE documents SET word_count = $1, block_count = $2, status = $3 WHERE id = $4',
+      [content.length, blocks.length, 'ready', docId],
+    );
+
+    logger.info(`Document created: ${docId}, blocks: ${blocks.length}, user: ${userId ?? 'anonymous'}`);
 
     res.json({
       document: {
         id: docId,
         title,
-        word_count: content.length,   // 字符数作为初始估算值
-        block_count: 0,
-        status: 'processing',
+        word_count: content.length,
+        block_count: blocks.length,
+        status: 'ready',
         created_at: docResult.rows[0].created_at,
       },
     });
@@ -227,14 +230,35 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// 删除文档
-router.delete('/:id', async (req, res) => {
+// 删除文档（仅创建者或管理员）
+router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = await getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const [docRow, userRow] = await Promise.all([
+      pool.query('SELECT user_id FROM documents WHERE id = $1', [id]),
+      pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]),
+    ]);
+
+    if (docRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const isAdmin = userRow.rows[0]?.is_admin === true;
+    const docOwnerId = docRow.rows[0].user_id;
+
+    if (!isAdmin && docOwnerId !== userId) {
+      return res.status(403).json({ error: 'Cannot delete other users\' documents' });
+    }
 
     await pool.query('DELETE FROM documents WHERE id = $1', [id]);
 
-    logger.info(`Document deleted: ${id}`);
+    logger.info(`Document deleted: ${id} by user ${userId}`);
     res.json({ message: 'Document deleted' });
   } catch (error) {
     logger.error('Delete document error:', error);
@@ -243,3 +267,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 export { router as documentRoutes };
+
