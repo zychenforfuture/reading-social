@@ -8,8 +8,6 @@ interface EditorProps {
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
   onClickCommentBubble: (commentIds: string[]) => void;
-  highlightedBlockHash?: string | null; // 仅高亮 CSS，不滚动
-  scrollToBlockHash?: string | null;    // 触发 scrollIntoView
 }
 
 interface Tooltip {
@@ -19,7 +17,7 @@ interface Tooltip {
   text: string;
 }
 
-export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble, highlightedBlockHash, scrollToBlockHash }: EditorProps) {
+export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble }: EditorProps) {
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -27,17 +25,6 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
   useEffect(() => {
     setTooltip(null);
   }, [content]);
-
-  // 仅 scrollToBlockHash 变化时才滚动（hover 不触发）
-  useEffect(() => {
-    if (!scrollToBlockHash) return;
-    const el = containerRef.current?.querySelector(
-      `[data-block-hash="${scrollToBlockHash}"]`
-    ) as HTMLElement | null;
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [scrollToBlockHash]);
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
@@ -130,13 +117,9 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
               key={block.block_hash}
               data-block-hash={block.block_hash}
               className={[
-                'mb-5 transition-colors duration-300',
-                block.block_hash === highlightedBlockHash
-                  ? 'bg-orange-100 dark:bg-orange-900/30 ring-2 ring-orange-400 rounded px-1'
-                  : totalCount > 0
-                  ? 'bg-yellow-50 dark:bg-yellow-900/20 rounded px-1'
-                  : '',
-              ].join(' ')}
+              'mb-5 transition-colors duration-300',
+              totalCount > 0 ? 'bg-yellow-50 dark:bg-yellow-900/20 rounded px-1' : '',
+            ].join(' ')}
             >
               {lines.map((line, lineIdx) => (
                 <p

@@ -63,12 +63,9 @@ interface ChapterCommentsProps {
   chapterBlocks: ContentBlock[];
   comments: Comment[];
   onSelectBlock: (hash: string, text: string) => void;
-  onHoverBlock?: (hash: string) => void;
-  onLeaveBlock?: () => void;
-  highlightedBlockHash?: string | null;
 }
 
-function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock, onHoverBlock, onLeaveBlock, highlightedBlockHash }: ChapterCommentsProps) {
+function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock }: ChapterCommentsProps) {
   const queryClient = useQueryClient();
   const { user } = useUserStore();
 
@@ -152,12 +149,7 @@ function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock, o
           return (
             <div
               key={block.block_hash}
-              className={cn(
-                'px-4 py-3 transition-colors duration-200',
-                block.block_hash === highlightedBlockHash ? 'bg-orange-50 dark:bg-orange-900/20' : '',
-              )}
-              onMouseEnter={() => onHoverBlock?.(block.block_hash)}
-              onMouseLeave={() => onLeaveBlock?.()}
+              className="px-4 py-3"
             >
               {/* 段落摘要（可点击） */}
               <button
@@ -232,8 +224,6 @@ export default function DocumentPage() {
   const [showTOC, setShowTOC] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [focusCommentIds, setFocusCommentIds] = useState<string[] | null>(null);
-  const [highlightedBlockHash, setHighlightedBlockHash] = useState<string | null>(null);
-  const [scrollToHash, setScrollToHash] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['document', id],
@@ -356,8 +346,6 @@ export default function DocumentPage() {
     setCurrentChapter(Math.max(0, Math.min(chapters.length - 1, idx)));
     setSelectedBlock(null);
     setShowComments(false);
-    setHighlightedBlockHash(null);
-    setScrollToHash(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -440,11 +428,7 @@ export default function DocumentPage() {
         content={chapterBlocks}
         blockCommentCount={blockCommentCount}
         comments={commentsData?.comments ?? []}
-        highlightedBlockHash={highlightedBlockHash}
-        scrollToBlockHash={scrollToHash}
         onSelectBlock={(hash, text) => {
-          setHighlightedBlockHash(null);
-          setScrollToHash(null);
           setSelectedBlock({ hash, text });
           setFocusCommentIds(null);
           setShowComments(true);
@@ -473,16 +457,11 @@ export default function DocumentPage() {
         documentId={id!}
         chapterBlocks={chapterBlocks}
         comments={commentsData?.comments ?? []}
-        highlightedBlockHash={highlightedBlockHash}
         onSelectBlock={(hash, text) => {
-          setHighlightedBlockHash(hash);
-          setScrollToHash(hash); // 点击才滚动
           setSelectedBlock({ hash, text });
           setFocusCommentIds(null);
           setShowComments(true);
         }}
-        onHoverBlock={(hash) => setHighlightedBlockHash(hash)} // 仅高亮，不滚动
-        onLeaveBlock={() => setHighlightedBlockHash(null)}
       />
 
       {/* 底部翻章按钮 */}
