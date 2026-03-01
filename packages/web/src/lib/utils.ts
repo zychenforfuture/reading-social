@@ -11,8 +11,9 @@ export const api: {
   baseURL: string;
   request<T>(endpoint: string, options?: RequestInit): Promise<T>;
   login: (email: string, password: string) => Promise<{ token: string; user: User }>;
-  register: (email: string, username: string, password: string) => Promise<{ message: string }>;
-  verifyEmail: (token: string) => Promise<{ message: string }>;
+  register: (email: string, username: string, password: string, code: string) => Promise<{ message: string }>;
+  sendCode: (email: string, purpose: 'register' | 'reset_password') => Promise<{ message: string }>;
+  resetPassword: (email: string, code: string, password: string) => Promise<{ message: string }>;
   getDocuments: () => Promise<{ documents: Document[] }>;
   getDocument: (id: string) => Promise<{ document: Document; content: ContentBlock[] }>;
   getDocumentComments: (id: string) => Promise<{ comments: Comment[]; blockCommentCount: Record<string, number> }>;
@@ -65,14 +66,23 @@ export const api: {
       body: JSON.stringify({ email, password }),
     }),
 
-  register: (email: string, username: string, password: string) =>
+  register: (email: string, username: string, password: string, code: string) =>
     api.request<{ message: string }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, username, password }),
+      body: JSON.stringify({ email, username, password, code }),
     }),
 
-  verifyEmail: (token: string) =>
-    api.request<{ message: string }>(`/auth/verify-email?token=${encodeURIComponent(token)}`),
+  sendCode: (email: string, purpose: 'register' | 'reset_password') =>
+    api.request<{ message: string }>('/auth/send-code', {
+      method: 'POST',
+      body: JSON.stringify({ email, purpose }),
+    }),
+
+  resetPassword: (email: string, code: string, password: string) =>
+    api.request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, password }),
+    }),
 
   // Documents
   getDocuments: () => api.request<{ documents: Document[] }>('/documents'),

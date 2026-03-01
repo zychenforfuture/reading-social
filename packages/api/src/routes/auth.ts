@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import crypto from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { sendVerificationEmail } from '../utils/email.js';
+import { sendOTPEmail } from '../utils/email.js';
 
 const router: Router = Router();
 
-// 启动时执行迁移，添加邮箱验证字段
+// 启动时执行迁移，添加邮箱验证字段及 OTP 表
 async function runMigration() {
   try {
     await pool.query(`
@@ -22,7 +21,19 @@ async function runMigration() {
       WHERE email_verified IS NULL OR email_verified = false
         AND verification_token IS NULL;
     `);
-    logger.info('Auth migration: email_verified columns ready');
+    // OTP 表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS email_otps (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        code VARCHAR(6) NOT NULL,
+        purpose VARCHAR(20) NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);
+    `);
+    logger.info('Auth migration: email_verified + email_otps ready');
   } catch (err) {
     logger.error('Auth migration error:', err);
   }
@@ -33,8 +44,9 @@ runMigration();
 // 注册请求验证 schema
 const registerSchema = z.object({
   email: z.string().email(),
-  username: z.string().min(3).max(50),
+  username: z.string().min(2).max(50),
   password: z.string().min(6),
+  code: z.string().length(6),
 });
 
 // 登录请求验证 schema
@@ -43,46 +55,108 @@ const loginSchema = z.object({
   password: z.string(),
 });
 
-// 注册
+// 发送 OTP 验证码
+router.post('/send-code', async (req, res) => {
+  try {
+    const { email, purpose } = z.object({
+      email: z.string().email(),
+      purpose: z.enum(['register', 'reset_password']),
+    }).parse(req.body);
+
+    if (purpose === 'register') {
+      const existing = await pool.query(
+        'SELECT id, email_verified FROM users WHERE email = $1',
+        [email]
+      );
+      if (existing.rows.length > 0 && existing.rows[0].email_verified) {
+        return res.status(400).json({ error: '该邮箱已注册，请直接登录' });
+      }
+    }
+
+    if (purpose === 'reset_password') {
+      const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+      if (existing.rows.length === 0) {
+        return res.status(400).json({ error: '该邮箱未注册' });
+      }
+    }
+
+    // 删除旧的验证码，生成新的
+    await pool.query(
+      'DELETE FROM email_otps WHERE email = $1 AND purpose = $2',
+      [email, purpose]
+    );
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 分钟
+
+    await pool.query(
+      'INSERT INTO email_otps (email, code, purpose, expires_at) VALUES ($1, $2, $3, $4)',
+      [email, code, purpose, expiresAt]
+    );
+
+    await sendOTPEmail(email, code, purpose);
+
+    logger.info(`OTP sent to ${email} for ${purpose}`);
+    res.json({ message: '验证码已发送，请查收邮件' });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', details: error.errors });
+    }
+    logger.error('Send code error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 注册（OTP 验证）
 router.post('/register', async (req, res) => {
   try {
-    const { email, username, password } = registerSchema.parse(req.body);
+    const { email, username, password, code } = registerSchema.parse(req.body);
+
+    // 检查验证码
+    const otpResult = await pool.query(
+      `SELECT id, expires_at FROM email_otps
+       WHERE email = $1 AND code = $2 AND purpose = 'register'
+       ORDER BY created_at DESC LIMIT 1`,
+      [email, code]
+    );
+
+    if (otpResult.rows.length === 0) {
+      return res.status(400).json({ error: '验证码错误' });
+    }
+    if (new Date(otpResult.rows[0].expires_at) < new Date()) {
+      return res.status(400).json({ error: '验证码已过期，请重新发送' });
+    }
 
     // 检查用户是否已存在
-    const existing = await pool.query('SELECT id, email_verified FROM users WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
-      // 若已存在但未验证，重新发送验证邮件
-      if (!existing.rows[0].email_verified) {
-        const token = crypto.randomBytes(32).toString('hex');
-        const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        await pool.query(
-          'UPDATE users SET verification_token = $1, verification_token_expires = $2 WHERE email = $3',
-          [token, expires, email]
-        );
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost';
-        await sendVerificationEmail(email, token, frontendUrl);
-        return res.status(200).json({ message: '验证邮件已重新发送，请查收邮箱完成验证' });
-      }
+    const existing = await pool.query(
+      'SELECT id, email_verified FROM users WHERE email = $1',
+      [email]
+    );
+    if (existing.rows.length > 0 && existing.rows[0].email_verified) {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // 生成验证 token
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24小时
+    // 清除 OTP
+    await pool.query('DELETE FROM email_otps WHERE email = $1 AND purpose = $2', [email, 'register']);
 
-    // TODO: 添加密码哈希
-    await pool.query(
-      `INSERT INTO users (email, username, password_hash, email_verified, verification_token, verification_token_expires)
-       VALUES ($1, $2, $3, false, $4, $5)`,
-      [email, username, `$hashed$${password}`, token, expires]
-    );
+    if (existing.rows.length > 0) {
+      // 已存在未验证的用户，更新并标记验证
+      await pool.query(
+        `UPDATE users SET username = $1, password_hash = $2, email_verified = true,
+         verification_token = NULL, verification_token_expires = NULL
+         WHERE email = $3`,
+        [username, `$hashed$${password}`, email]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO users (email, username, password_hash, email_verified)
+         VALUES ($1, $2, $3, true)`,
+        [email, username, `$hashed$${password}`]
+      );
+    }
 
-    // 发送验证邮件
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost';
-    await sendVerificationEmail(email, token, frontendUrl);
-
-    logger.info(`User registered (pending verification): ${email}`);
-    res.status(201).json({ message: '注册成功，请查收邮箱完成验证后即可登录' });
+    logger.info(`User registered: ${email}`);
+    res.status(201).json({ message: '注册成功，请登录' });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });
@@ -92,46 +166,47 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// 验证邮箱
-router.get('/verify-email', async (req, res) => {
+// 重置密码（OTP 验证）
+router.post('/reset-password', async (req, res) => {
   try {
-    const { token } = req.query;
-    if (!token || typeof token !== 'string') {
-      return res.status(400).json({ error: 'Invalid token' });
-    }
+    const { email, code, password } = z.object({
+      email: z.string().email(),
+      code: z.string().length(6),
+      password: z.string().min(6),
+    }).parse(req.body);
 
-    const result = await pool.query(
-      `SELECT id, email_verified, verification_token_expires
-       FROM users
-       WHERE verification_token = $1`,
-      [token]
+    const otpResult = await pool.query(
+      `SELECT id, expires_at FROM email_otps
+       WHERE email = $1 AND code = $2 AND purpose = 'reset_password'
+       ORDER BY created_at DESC LIMIT 1`,
+      [email, code]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Token not found or already used' });
+    if (otpResult.rows.length === 0) {
+      return res.status(400).json({ error: '验证码错误' });
+    }
+    if (new Date(otpResult.rows[0].expires_at) < new Date()) {
+      return res.status(400).json({ error: '验证码已过期，请重新发送' });
     }
 
-    const user = result.rows[0];
-
-    if (user.email_verified) {
-      return res.status(400).json({ error: 'Email already verified' });
+    const userResult = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({ error: '用户不存在' });
     }
 
-    if (new Date(user.verification_token_expires) < new Date()) {
-      return res.status(400).json({ error: 'Token expired' });
-    }
-
+    await pool.query('DELETE FROM email_otps WHERE email = $1 AND purpose = $2', [email, 'reset_password']);
     await pool.query(
-      `UPDATE users
-       SET email_verified = true, verification_token = NULL, verification_token_expires = NULL
-       WHERE id = $1`,
-      [user.id]
+      'UPDATE users SET password_hash = $1 WHERE email = $2',
+      [`$hashed$${password}`, email]
     );
 
-    logger.info(`Email verified for user ${user.id}`);
-    res.json({ message: '邮箱验证成功，请登录' });
+    logger.info(`Password reset for ${email}`);
+    res.json({ message: '密码重置成功，请登录' });
   } catch (error) {
-    logger.error('Verify email error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', details: error.errors });
+    }
+    logger.error('Reset password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

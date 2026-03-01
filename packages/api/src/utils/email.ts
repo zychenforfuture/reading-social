@@ -40,3 +40,38 @@ export async function sendVerificationEmail(
 
   logger.info(`Verification email sent to ${to}`);
 }
+
+export async function sendOTPEmail(
+  to: string,
+  code: string,
+  purpose: 'register' | 'reset_password'
+): Promise<void> {
+  const subjectMap = {
+    register: '注册验证码 - 共鸣阅读',
+    reset_password: '重置密码验证码 - 共鸣阅读',
+  };
+  const titleMap = {
+    register: '邮箱注册验证码',
+    reset_password: '密码重置验证码',
+  };
+
+  await transporter.sendMail({
+    from: `"共鸣阅读" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to,
+    subject: subjectMap[purpose],
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <h2 style="color: #1a1a1a;">${titleMap[purpose]}</h2>
+        <p style="color: #555;">您的验证码为（10 分钟内有效）：</p>
+        <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #000;
+                    background: #f5f5f5; border-radius: 8px; padding: 16px 24px;
+                    display: inline-block; margin: 12px 0;">
+          ${code}
+        </div>
+        <p style="margin-top:24px;color:#999;font-size:12px;">如非本人操作，请忽略此邮件。</p>
+      </div>
+    `,
+  });
+
+  logger.info(`OTP email (${purpose}) sent to ${to}`);
+}
