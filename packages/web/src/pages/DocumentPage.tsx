@@ -175,6 +175,7 @@ export default function DocumentPage() {
   const [showComments, setShowComments] = useState(false);
   const [focusCommentIds, setFocusCommentIds] = useState<string[] | null>(null);
   const [highlightedBlockHash, setHighlightedBlockHash] = useState<string | null>(null);
+  const [scrollToHash, setScrollToHash] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['document', id],
@@ -298,6 +299,7 @@ export default function DocumentPage() {
     setSelectedBlock(null);
     setShowComments(false);
     setHighlightedBlockHash(null);
+    setScrollToHash(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -381,8 +383,10 @@ export default function DocumentPage() {
         blockCommentCount={blockCommentCount}
         comments={commentsData?.comments ?? []}
         highlightedBlockHash={highlightedBlockHash}
+        scrollToBlockHash={scrollToHash}
         onSelectBlock={(hash, text) => {
           setHighlightedBlockHash(null);
+          setScrollToHash(null);
           setSelectedBlock({ hash, text });
           setFocusCommentIds(null);
           setShowComments(true);
@@ -413,11 +417,12 @@ export default function DocumentPage() {
         highlightedBlockHash={highlightedBlockHash}
         onSelectBlock={(hash, text) => {
           setHighlightedBlockHash(hash);
+          setScrollToHash(hash); // 点击才滚动
           setSelectedBlock({ hash, text });
           setFocusCommentIds(null);
           setShowComments(true);
         }}
-        onHoverBlock={(hash) => setHighlightedBlockHash(hash)}
+        onHoverBlock={(hash) => setHighlightedBlockHash(hash)} // 仅高亮，不滚动
         onLeaveBlock={() => setHighlightedBlockHash(null)}
       />
 

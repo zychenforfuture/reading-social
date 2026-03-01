@@ -8,7 +8,8 @@ interface EditorProps {
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
   onClickCommentBubble: (commentIds: string[]) => void;
-  highlightedBlockHash?: string | null;
+  highlightedBlockHash?: string | null; // 仅高亮 CSS，不滚动
+  scrollToBlockHash?: string | null;    // 触发 scrollIntoView
 }
 
 interface Tooltip {
@@ -18,7 +19,7 @@ interface Tooltip {
   text: string;
 }
 
-export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble, highlightedBlockHash }: EditorProps) {
+export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble, highlightedBlockHash, scrollToBlockHash }: EditorProps) {
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -27,16 +28,16 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
     setTooltip(null);
   }, [content]);
 
-  // 高亮段落时滚动到视口
+  // 仅 scrollToBlockHash 变化时才滚动（hover 不触发）
   useEffect(() => {
-    if (!highlightedBlockHash) return;
+    if (!scrollToBlockHash) return;
     const el = containerRef.current?.querySelector(
-      `[data-block-hash="${highlightedBlockHash}"]`
+      `[data-block-hash="${scrollToBlockHash}"]`
     ) as HTMLElement | null;
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [highlightedBlockHash]);
+  }, [scrollToBlockHash]);
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
