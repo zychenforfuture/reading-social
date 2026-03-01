@@ -11,7 +11,8 @@ export const api: {
   baseURL: string;
   request<T>(endpoint: string, options?: RequestInit): Promise<T>;
   login: (email: string, password: string) => Promise<{ token: string; user: User }>;
-  register: (email: string, username: string, password: string) => Promise<{ user: User }>;
+  register: (email: string, username: string, password: string) => Promise<{ message: string }>;
+  verifyEmail: (token: string) => Promise<{ message: string }>;
   getDocuments: () => Promise<{ documents: Document[] }>;
   getDocument: (id: string) => Promise<{ document: Document; content: ContentBlock[] }>;
   getDocumentComments: (id: string) => Promise<{ comments: Comment[]; blockCommentCount: Record<string, number> }>;
@@ -65,10 +66,13 @@ export const api: {
     }),
 
   register: (email: string, username: string, password: string) =>
-    api.request<{ user: User }>('/auth/register', {
+    api.request<{ message: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, username, password }),
     }),
+
+  verifyEmail: (token: string) =>
+    api.request<{ message: string }>(`/auth/verify-email?token=${encodeURIComponent(token)}`),
 
   // Documents
   getDocuments: () => api.request<{ documents: Document[] }>('/documents'),

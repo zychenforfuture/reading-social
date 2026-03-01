@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { api, type User } from '../lib/utils';
 import { useUserStore } from '../stores/userStore';
-import { FileText } from 'lucide-react';
+import { FileText, Mail } from 'lucide-react';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useUserStore();
   const [isRegister, setIsRegister] = useState(false);
+  const [registerSuccess, setRegisterSuccess] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -25,13 +26,9 @@ export default function LoginPage() {
     },
     onSuccess: (data) => {
       if (isRegister) {
-        // 注册成功后自动登录
-        api.login(formData.email, formData.password).then((loginData) => {
-          login(loginData.user, (loginData as any).token);
-          navigate('/');
-        });
+        setRegisterSuccess(true);
       } else {
-        login(data.user, (data as any).token);
+        login((data as any).user as User, (data as any).token);
         navigate('/');
       }
     },
@@ -41,6 +38,29 @@ export default function LoginPage() {
     e.preventDefault();
     mutation.mutate();
   };
+
+  // 注册成功：显示"请查验邮箱"提示页
+  if (registerSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="w-full max-w-md space-y-6 text-center">
+          <Mail className="h-16 w-16 mx-auto text-primary" />
+          <h2 className="text-2xl font-bold">验证邮件已发送</h2>
+          <p className="text-muted-foreground">
+            注册成功！我们已向 <span className="font-medium text-foreground">{formData.email}</span> 发送了验证邮件，
+            请点击邮件中的链接完成验证后再登录。
+          </p>
+          <p className="text-sm text-muted-foreground">链接 24 小时内有效。如未收到请检查垃圾邮件。</p>
+          <button
+            onClick={() => { setRegisterSuccess(false); setIsRegister(false); }}
+            className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-primary/90 bg-primary h-10 px-6 py-2 text-primary-foreground"
+          >
+            去登录
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -54,6 +74,25 @@ export default function LoginPage() {
             跨文档协同评论系统
           </p>
         </div>
+
+        {mutation.isError && (
+          <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive text-center">
+            {(() => {
+              const err = mutation.error as any;
+              const msg = err?.message || '';
+              if (msg.includes('email_not_verified')) {
+                return '邮箱尚未验证，请查收验证邮件后再登录';
+              }
+              if (msg.includes('Email already registered')) {
+                return '该邮箱已注册，请直接登录';
+              }
+              if (msg.includes('Invalid credentials')) {
+                return '邮箱或密码错误';
+              }
+              return msg || '操作失败，请稍后重试';
+            })()}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {isRegister && (
@@ -102,15 +141,11 @@ export default function LoginPage() {
 
         <div className="text-center text-sm">
           <button
-            onClick={() => setIsRegister(!isRegister)}
+            onClick={() => { setIsRegister(!isRegister); mutation.reset(); }}
             className="text-primary hover:underline"
           >
             {isRegister ? '已有账号？去登录' : '没有账号？去注册'}
           </button>
-        </div>
-
-        <div className="text-center text-xs text-muted-foreground">
-          <p>提示：演示模式下密码不需要哈希</p>
         </div>
       </div>
     </div>
