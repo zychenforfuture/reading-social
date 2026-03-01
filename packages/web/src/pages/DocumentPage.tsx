@@ -71,9 +71,6 @@ interface ChapterCommentsProps {
 function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock, onHoverBlock, onLeaveBlock, highlightedBlockHash }: ChapterCommentsProps) {
   const queryClient = useQueryClient();
   const { user } = useUserStore();
-  const blockHashSet = new Set(chapterBlocks.map(b => b.block_hash));
-  const chapterComments = comments.filter(c => blockHashSet.has(c.block_hash));
-  if (chapterComments.length === 0) return null;
 
   type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
 
@@ -116,6 +113,12 @@ function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock, o
     mutationFn: (id: string) => api.deleteComment(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] }),
   });
+
+  const blockHashSet = new Set(chapterBlocks.map(b => b.block_hash));
+  const chapterComments = comments.filter(c => blockHashSet.has(c.block_hash));
+
+  // 所有 hooks 已声明，现在才可以条件返回
+  if (chapterComments.length === 0) return null;
 
   // 按 block 顺序分组
   const groups: { block: ContentBlock; comments: Comment[] }[] = [];
