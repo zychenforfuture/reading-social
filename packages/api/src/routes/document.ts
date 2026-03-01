@@ -134,15 +134,19 @@ router.get('/:id/comments', async (req, res) => {
       return res.json({ comments: [], blockCommentCount: {} });
     }
 
-    // 获取这些块的所有评论
+    // 获取这些块的所有评论（含 like_count 和当前用户是否已点赞）
+    const { userId } = await getCallerInfo(req);
     const commentsResult = await pool.query(
       `SELECT c.*, u.username, u.avatar_url,
+              c.like_count,
+              CASE WHEN cl.user_id IS NOT NULL THEN true ELSE false END as liked_by_me,
               (SELECT COUNT(*) FROM comments c2 WHERE c2.parent_comment_id = c.id) as reply_count
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
+       LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $2
        WHERE c.block_hash = ANY($1) AND c.is_deleted = false
        ORDER BY c.created_at ASC`,
-      [blockHashes]
+      [blockHashes, userId]
     );
 
     // 统计每个块的评论数

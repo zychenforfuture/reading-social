@@ -21,6 +21,7 @@ export const api: {
   createComment: (blockHash: string, content: string, parentCommentId?: string, selectedText?: string) => Promise<{ comment: Comment }>;
   updateComment: (id: string, updates: Partial<{ content: string; isResolved: boolean }>) => Promise<{ comment: Comment }>;
   deleteComment: (id: string) => Promise<unknown>;
+  likeComment: (id: string) => Promise<{ liked: boolean; likeCount: number }>;
   getBlock: (hash: string) => Promise<{ block?: ContentBlock; documents?: Document[] }>;
   getBlockSimilar: (hash: string) => Promise<{ similar?: SimilarBlock[] }>;
 } = {
@@ -95,6 +96,8 @@ export const api: {
     }),
   deleteComment: (id: string) =>
     api.request<unknown>(`/comments/${id}`, { method: 'DELETE' }),
+  likeComment: (id: string) =>
+    api.request<{ liked: boolean; likeCount: number }>(`/comments/${id}/like`, { method: 'POST' }),
 
   // Blocks
   getBlock: (hash: string) => api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),
@@ -137,6 +140,8 @@ export type Comment = {
   avatar_url?: string;
   selected_text?: string;
   is_resolved: boolean;
+  like_count: number;
+  liked_by_me: boolean;
   created_at: string;
   updated_at: string;
   replies?: Comment[];

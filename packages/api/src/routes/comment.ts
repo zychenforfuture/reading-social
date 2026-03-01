@@ -5,6 +5,25 @@ import { logger } from '../config/logger.js';
 
 const router: Router = Router();
 
+// ─── DB 迁移（首次启动自动执行）────────────────────────────────────
+;(async () => {
+  try {
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS like_count INTEGER NOT NULL DEFAULT 0`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS comment_likes (
+        comment_id UUID NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        user_id    UUID NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (comment_id, user_id)
+      )
+    `);
+    logger.info('comment_likes migration OK');
+  } catch (err) {
+    logger.error('comment_likes migration failed:', err);
+  }
+})();
+// ────────────────────────────────────────────────────────────────
+
 // ─── SSE 客户端注册表 ────────────────────────────────────────────
 // documentId → Set<Response>（存每个打开文档的长连接）
 const sseClients = new Map<string, Set<Response>>();
@@ -249,6 +268,83 @@ router.delete('/:id', async (req, res) => {
     res.json({ message: 'Comment deleted' });
   } catch (error) {
     logger.error('Delete comment error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 点赞 / 取消点赞（toggle）
+router.post('/:id/like', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = await getUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 查评论（需要 block_hash 用于广播）
+      const commentRow = await client.query(
+        'SELECT block_hash FROM comments WHERE id = $1 AND is_deleted = false',
+        [id]
+      );
+      if (commentRow.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Comment not found' });
+      }
+      const blockHash: string = commentRow.rows[0].block_hash;
+
+      // 判断是否已点赞
+      const existing = await client.query(
+        'SELECT 1 FROM comment_likes WHERE comment_id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      let liked: boolean;
+      let likeCount: number;
+
+      if (existing.rows.length > 0) {
+        // 取消点赞
+        await client.query('DELETE FROM comment_likes WHERE comment_id = $1 AND user_id = $2', [id, userId]);
+        const updated = await client.query(
+          'UPDATE comments SET like_count = GREATEST(0, like_count - 1) WHERE id = $1 RETURNING like_count',
+          [id]
+        );
+        liked = false;
+        likeCount = updated.rows[0].like_count;
+      } else {
+        // 点赞
+        await client.query('INSERT INTO comment_likes (comment_id, user_id) VALUES ($1, $2)', [id, userId]);
+        const updated = await client.query(
+          'UPDATE comments SET like_count = like_count + 1 WHERE id = $1 RETURNING like_count',
+          [id]
+        );
+        liked = true;
+        likeCount = updated.rows[0].like_count;
+      }
+
+      await client.query('COMMIT');
+
+      // 广播到所有包含该 block 的文档（跨文档实时同步）
+      try {
+        const docRows = await pool.query(
+          'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',
+          [blockHash]
+        );
+        for (const row of docRows.rows) {
+          broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount });
+        }
+      } catch { /* 广播失败不影响正常响应 */ }
+
+      res.json({ liked, likeCount });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    logger.error('Like comment error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

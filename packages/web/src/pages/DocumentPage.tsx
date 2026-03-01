@@ -210,9 +210,30 @@ export default function DocumentPage() {
       const url = `/api/comments/stream/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
       es = new EventSource(url);
 
-      es.onmessage = () => {
-        // 收到新评论事件，触发评论数据刷新
-        queryClient.invalidateQueries({ queryKey: ['document-comments', id] });
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'like_updated') {
+            // 点赞更新：直接修改缓存，不触发重新请求（保留 liked_by_me 状态）
+            queryClient.setQueryData(
+              ['document-comments', id],
+              (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
+                if (!old) return old;
+                return {
+                  ...old,
+                  comments: old.comments.map((c: Comment) =>
+                    c.id === data.commentId ? { ...c, like_count: data.likeCount } : c
+                  ),
+                };
+              }
+            );
+          } else {
+            // 新评论等其他事件：刷新评论列表
+            queryClient.invalidateQueries({ queryKey: ['document-comments', id] });
+          }
+        } catch {
+          queryClient.invalidateQueries({ queryKey: ['document-comments', id] });
+        }
       };
 
       es.onopen = () => { retries = 0; };

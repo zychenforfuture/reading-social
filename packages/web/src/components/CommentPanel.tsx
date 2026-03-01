@@ -75,7 +75,43 @@ export default function CommentPanel({
       // 不清除 selectedBlock，保持抽屉继续显示该 block 的评论
     },
   });
+  type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
 
+  const likeMutation = useMutation({
+    mutationFn: (commentId: string) => api.likeComment(commentId),
+    onMutate: async (commentId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['document-comments', documentId] });
+      const previous = queryClient.getQueryData<CommentsCache>(['document-comments', documentId]);
+      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          comments: old.comments.map((c) =>
+            c.id === commentId
+              ? { ...c, liked_by_me: !c.liked_by_me, like_count: c.liked_by_me ? c.like_count - 1 : c.like_count + 1 }
+              : c
+          ),
+        };
+      });
+      return { previous };
+    },
+    onError: (_err, _commentId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['document-comments', documentId], context.previous);
+      }
+    },
+    onSuccess: (data, commentId) => {
+      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          comments: old.comments.map((c) =>
+            c.id === commentId ? { ...c, liked_by_me: data.liked, like_count: data.likeCount } : c
+          ),
+        };
+      });
+    },
+  });
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteComment(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] }),
@@ -179,9 +215,15 @@ export default function CommentPanel({
                       {comment.content}
                     </p>
                     <div className="flex items-center gap-3 mt-2">
-                      <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                        <ThumbsUp className="h-3 w-3" />
-                        <span>赞</span>
+                      <button
+                        onClick={() => likeMutation.mutate(comment.id)}
+                        className={cn(
+                          'flex items-center gap-1 text-xs transition-colors',
+                          comment.liked_by_me ? 'text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
+                        <span>{comment.like_count > 0 ? comment.like_count : '赞'}</span>
                       </button>
                       <button
                         onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
@@ -245,9 +287,15 @@ export default function CommentPanel({
                               {comment.content}
                             </p>
                             <div className="flex items-center gap-3 mt-1.5">
-                              <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                                <ThumbsUp className="h-3 w-3" />
-                                <span>赞</span>
+                              <button
+                                onClick={() => likeMutation.mutate(comment.id)}
+                                className={cn(
+                                  'flex items-center gap-1 text-xs transition-colors',
+                                  comment.liked_by_me ? 'text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+                                )}
+                              >
+                                <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
+                                <span>{comment.like_count > 0 ? comment.like_count : '赞'}</span>
                               </button>
                               <button
                                 onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
