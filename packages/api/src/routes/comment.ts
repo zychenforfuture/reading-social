@@ -17,6 +17,11 @@ const router: Router = Router();
         PRIMARY KEY (comment_id, user_id)
       )
     `);
+    // 二级回复结构迁移
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS root_id UUID REFERENCES comments(id) ON DELETE CASCADE`);
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_count INTEGER NOT NULL DEFAULT 0`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_root_id ON comments(root_id)`);
     logger.info('comment_likes migration OK');
   } catch (err) {
     logger.error('comment_likes migration failed:', err);
@@ -66,9 +71,12 @@ async function getUserId(req: Request): Promise<string | null> {
 
 const commentSchema = z.object({
   content: z.string().min(1).max(5000),
-  blockHash: z.string().length(64), // SHA-256 hex
-  parentCommentId: z.string().uuid().optional(),
+  blockHash: z.string().length(64).optional(), // 根评论必填
+  rootId: z.string().uuid().optional(),         // 回复时必填
+  replyToUserId: z.string().uuid().optional(),  // @某人（可选）
   selectedText: z.string().max(500).optional(),
+  // 小兴容旧字段
+  parentCommentId: z.string().uuid().optional(),
 });
 
 // SSE 推送：订阅文档的实时评论更新
@@ -97,6 +105,27 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
     removeSseClient(documentId, res);
     logger.info(`SSE disconnected: doc=${documentId.substring(0, 8)}…`);
   });
+});
+
+// 获取根评论下的所有回复（二级扁平）
+router.get('/:id/replies', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT c.*, u.username, u.avatar_url,
+              ru.username as reply_to_username
+       FROM comments c
+       LEFT JOIN users u ON c.user_id = u.id
+       LEFT JOIN users ru ON ru.id = c.reply_to_user_id
+       WHERE c.root_id = $1 AND c.is_deleted = false
+       ORDER BY c.created_at ASC`,
+      [id]
+    );
+    res.json({ replies: result.rows });
+  } catch (error) {
+    logger.error('Get replies error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // 获取某内容块的所有评论
@@ -134,26 +163,88 @@ router.get('/block/:hash', async (req, res) => {
   }
 });
 
-// 创建评论
+// 创建评论（根评论或回复）
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { content, blockHash, parentCommentId, selectedText } = commentSchema.parse(req.body);
+    const { content, blockHash, rootId, replyToUserId, selectedText } = commentSchema.parse(req.body);
 
     const userId = await getUserId(req);
 
-    // 确保 selected_text 列存在（兼容旧数据库）
-    await pool.query(`
-      ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)
-    `).catch(() => {});
+    // 确保列存在（兼容旧数据库）
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)`).catch(() => {});
+
+    if (rootId) {
+      // ───── 回复模式 ─────
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // 从根评论继承 block_hash
+        const rootRow = await client.query(
+          'SELECT block_hash FROM comments WHERE id = $1 AND root_id IS NULL AND is_deleted = false',
+          [rootId]
+        );
+        if (rootRow.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Root comment not found' });
+        }
+        const inheritedBlockHash: string = rootRow.rows[0].block_hash;
+
+        const result = await client.query(
+          `INSERT INTO comments (block_hash, user_id, content, root_id, reply_to_user_id, selected_text)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, block_hash, user_id, content, root_id, reply_to_user_id, selected_text, created_at`,
+          [inheritedBlockHash, userId, content, rootId, replyToUserId || null, selectedText || null]
+        );
+
+        // 根评论 reply_count +1
+        await client.query('UPDATE comments SET reply_count = reply_count + 1 WHERE id = $1', [rootId]);
+        await client.query('COMMIT');
+
+        const reply = result.rows[0];
+        if (userId) {
+          const u = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+          reply.username = u.rows[0]?.username ?? null;
+        }
+        if (replyToUserId) {
+          const rtu = await pool.query('SELECT username FROM users WHERE id = $1', [replyToUserId]);
+          reply.reply_to_username = rtu.rows[0]?.username ?? null;
+        }
+
+        logger.info(`Reply created: ${reply.id} under root ${rootId.substring(0, 8)}...`);
+
+        // 跨文档广播
+        try {
+          const docRows = await pool.query(
+            'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',
+            [inheritedBlockHash]
+          );
+          for (const row of docRows.rows) {
+            broadcastToDocument(row.document_id, { type: 'new_reply', rootId, reply });
+          }
+        } catch { /* 广播失败不影响响应 */ }
+
+        return res.status(201).json({ comment: reply });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    // ───── 根评论模式 ─────
+    if (!blockHash) {
+      return res.status(400).json({ error: 'blockHash is required for root comments' });
+    }
 
     const result = await pool.query(
-      `INSERT INTO comments (block_hash, user_id, content, parent_comment_id, selected_text)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, block_hash, user_id, content, parent_comment_id, selected_text, created_at`,
-      [blockHash, userId, content, parentCommentId || null, selectedText || null]
+      `INSERT INTO comments (block_hash, user_id, content, selected_text)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, block_hash, user_id, content, selected_text, reply_count, created_at`,
+      [blockHash, userId, content, selectedText || null]
     );
 
-    // 补充 username
     const comment = result.rows[0];
     if (userId) {
       const userResult = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
@@ -162,7 +253,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     logger.info(`Comment created: ${comment.id} on block ${blockHash.substring(0, 8)}...`);
 
-    // 广播到所有订阅了含该 block 的文档的 SSE 客户端
     try {
       const docRows = await pool.query(
         'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',

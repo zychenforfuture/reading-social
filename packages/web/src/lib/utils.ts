@@ -19,6 +19,8 @@ export const api: {
   deleteDocument: (id: string) => Promise<unknown>;
   getBlockComments: (hash: string) => Promise<{ comments: (Comment & { replies?: Comment[] })[] }>;
   createComment: (blockHash: string, content: string, parentCommentId?: string, selectedText?: string) => Promise<{ comment: Comment }>;
+  createReply: (rootId: string, content: string, replyToUserId?: string) => Promise<{ comment: Comment }>;
+  getReplies: (rootId: string) => Promise<{ replies: Comment[] }>;
   updateComment: (id: string, updates: Partial<{ content: string; isResolved: boolean }>) => Promise<{ comment: Comment }>;
   deleteComment: (id: string) => Promise<unknown>;
   likeComment: (id: string) => Promise<{ liked: boolean; likeCount: number }>;
@@ -84,11 +86,18 @@ export const api: {
   // Comments
   getBlockComments: (hash: string) =>
     api.request<{ comments: (Comment & { replies?: Comment[] })[] }>(`/comments/block/${hash}`),
-  createComment: (blockHash: string, content: string, parentCommentId?: string, selectedText?: string) =>
+  createComment: (blockHash: string, content: string, _parentCommentId?: string, selectedText?: string) =>
     api.request<{ comment: Comment }>('/comments', {
       method: 'POST',
-      body: JSON.stringify({ blockHash, content, parentCommentId, selectedText }),
+      body: JSON.stringify({ blockHash, content, selectedText }),
     }),
+  createReply: (rootId: string, content: string, replyToUserId?: string) =>
+    api.request<{ comment: Comment }>('/comments', {
+      method: 'POST',
+      body: JSON.stringify({ rootId, content, replyToUserId }),
+    }),
+  getReplies: (rootId: string) =>
+    api.request<{ replies: Comment[] }>(`/comments/${rootId}/replies`),
   updateComment: (id: string, updates: Partial<{ content: string; isResolved: boolean }>) =>
     api.request<{ comment: Comment }>(`/comments/${id}`, {
       method: 'PATCH',
@@ -142,6 +151,10 @@ export type Comment = {
   is_resolved: boolean;
   like_count: number;
   liked_by_me: boolean;
+  reply_count: number;
+  root_id?: string | null;
+  reply_to_user_id?: string | null;
+  reply_to_username?: string | null;
   created_at: string;
   updated_at: string;
   replies?: Comment[];

@@ -227,6 +227,30 @@ export default function DocumentPage() {
                 };
               }
             );
+          } else if (data.type === 'new_reply') {
+            // 他人回复：根评论 reply_count +1
+            queryClient.setQueryData(
+              ['document-comments', id],
+              (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
+                if (!old) return old;
+                return {
+                  ...old,
+                  comments: old.comments.map((c: Comment) =>
+                    c.id === data.rootId ? { ...c, reply_count: c.reply_count + 1 } : c
+                  ),
+                };
+              }
+            );
+            // 如果已展开该回复列表，追加新回复
+            queryClient.setQueryData(
+              ['replies', data.rootId],
+              (old: { replies: Comment[] } | undefined) => {
+                if (!old) return old;
+                const exists = old.replies.some((r: Comment) => r.id === data.reply?.id);
+                if (exists) return old;
+                return { replies: [...old.replies, data.reply] };
+              }
+            );
           } else {
             // 新评论等其他事件：刷新评论列表
             queryClient.invalidateQueries({ queryKey: ['document-comments', id] });

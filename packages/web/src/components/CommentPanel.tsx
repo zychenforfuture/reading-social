@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Comment, cn, timeAgo } from '../lib/utils';
 import { useUserStore } from '../stores/userStore';
-import { X, ThumbsUp, MessageSquare, Send } from 'lucide-react';
+import { X, ThumbsUp, MessageSquare, Send, ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react';
 
 interface CommentPanelProps {
   documentId: string;
@@ -25,6 +25,176 @@ function Avatar({ name }: { name: string }) {
   );
 }
 
+function SmallAvatar({ name }: { name: string }) {
+  const colors = ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'];
+  const color = colors[(name.charCodeAt(0) || 0) % colors.length];
+  return (
+    <div className={cn('w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-medium shrink-0', color)}>
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+// ─── 回复区域（内联展开，每条根评论下方）────────────────────────────
+function ReplySection({
+  comment,
+  documentId,
+  currentUser,
+}: {
+  comment: Comment;
+  documentId: string;
+  currentUser: { id: string; username?: string; is_admin?: boolean } | null;
+}) {
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [showInput, setShowInput] = useState(false);
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // 展开时才加载回复列表
+  const { data, isLoading } = useQuery({
+    queryKey: ['replies', comment.id],
+    queryFn: () => api.getReplies(comment.id),
+    enabled: expanded,
+    staleTime: 30000,
+  });
+
+  const replyMutation = useMutation({
+    mutationFn: (content: string) =>
+      api.createReply(comment.id, content, undefined),
+    onSuccess: (res) => {
+      setText('');
+      setShowInput(false);
+      // 追加到本地缓存
+      queryClient.setQueryData(['replies', comment.id], (old: { replies: Comment[] } | undefined) => ({
+        replies: [...(old?.replies ?? []), res.comment],
+      }));
+      // 更新根评论 reply_count
+      queryClient.setQueryData(
+        ['document-comments', documentId],
+        (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            comments: old.comments.map((c) =>
+              c.id === comment.id ? { ...c, reply_count: c.reply_count + 1 } : c
+            ),
+          };
+        }
+      );
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteComment(id),
+    onSuccess: (_data, deletedId) => {
+      queryClient.setQueryData(['replies', comment.id], (old: { replies: Comment[] } | undefined) => ({
+        replies: (old?.replies ?? []).filter((r) => r.id !== deletedId),
+      }));
+      queryClient.setQueryData(
+        ['document-comments', documentId],
+        (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            comments: old.comments.map((c) =>
+              c.id === comment.id ? { ...c, reply_count: Math.max(0, c.reply_count - 1) } : c
+            ),
+          };
+        }
+      );
+    },
+  });
+
+  // SSE new_reply 收到时，追加到缓存（如果已展开）
+  useEffect(() => {
+    // DocumentPage 的 SSE handler 会更新 reply_count，这里只做展开状态下的追加
+  }, []);
+
+  const replyCount = comment.reply_count;
+
+  return (
+    <div className="mt-1.5">
+      {/* 操作行：回复按钮 + 展开按钮 */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => { setShowInput(!showInput); if (!showInput) setTimeout(() => inputRef.current?.focus(), 50); }}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <CornerDownRight className="h-3 w-3" />
+          回复
+        </button>
+        {replyCount > 0 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-xs text-primary/80 hover:text-primary transition-colors"
+          >
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {expanded ? '收起' : `查看 ${replyCount} 条回复`}
+          </button>
+        )}
+      </div>
+
+      {/* 回复输入框 */}
+      {showInput && (
+        <div className="mt-2 flex items-end gap-1.5">
+          <textarea
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) {
+                replyMutation.mutate(text.trim());
+              }
+              if (e.key === 'Escape') { setShowInput(false); setText(''); }
+            }}
+            rows={2}
+            placeholder="写下回复… (⌘Enter 发送)"
+            className="flex-1 resize-none rounded-md border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            onClick={() => { if (text.trim()) replyMutation.mutate(text.trim()); }}
+            disabled={!text.trim() || replyMutation.isPending}
+            className="h-7 w-7 shrink-0 rounded-full bg-primary flex items-center justify-center text-primary-foreground disabled:opacity-30"
+          >
+            <Send className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      {/* 回复列表 */}
+      {expanded && (
+        <div className="mt-2 space-y-2 pl-1 border-l-2 border-muted">
+          {isLoading && <p className="text-xs text-muted-foreground pl-2">加载中…</p>}
+          {(data?.replies ?? []).map((reply) => (
+            <div key={reply.id} className="flex gap-2 group/reply pl-2">
+              <SmallAvatar name={reply.username || '匿名'} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-xs font-medium">{reply.username || '匿名用户'}</span>
+                  {reply.reply_to_username && (
+                    <span className="text-xs text-muted-foreground">@ {reply.reply_to_username}</span>
+                  )}
+                  <span className="text-xs text-muted-foreground">{timeAgo(reply.created_at)}</span>
+                </div>
+                <p className="text-xs text-foreground leading-relaxed break-words mt-0.5">{reply.content}</p>
+                {(currentUser?.is_admin || reply.user_id === currentUser?.id) && (
+                  <button
+                    onClick={() => deleteMutation.mutate(reply.id)}
+                    className="text-xs text-muted-foreground hover:text-destructive opacity-0 group-hover/reply:opacity-100 transition-colors mt-0.5"
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CommentPanel({
   documentId,
   comments,
@@ -37,7 +207,6 @@ export default function CommentPanel({
   const queryClient = useQueryClient();
   const { user } = useUserStore();
   const [newComment, setNewComment] = useState('');
-  const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -57,24 +226,23 @@ export default function CommentPanel({
     listRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }, [selectedBlock?.hash]);
 
-  // 选中新段落时清空回复状态
+  // 选中新段落时清空输入
   useEffect(() => {
-    setReplyTo(null);
     setNewComment('');
   }, [selectedBlock]);
 
   const createMutation = useMutation({
     mutationFn: (content: string) => {
       if (!selectedBlock) throw new Error('No block selected');
-      return api.createComment(selectedBlock.hash, content, replyTo?.id, selectedBlock.text);
+      return api.createComment(selectedBlock.hash, content, undefined, selectedBlock.text);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] });
       setNewComment('');
-      setReplyTo(null);
       // 不清除 selectedBlock，保持抽屉继续显示该 block 的评论
     },
   });
+
   type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
 
   const likeMutation = useMutation({
@@ -112,6 +280,7 @@ export default function CommentPanel({
       });
     },
   });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteComment(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] }),
@@ -225,12 +394,6 @@ export default function CommentPanel({
                         <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
                         <span>{comment.like_count > 0 ? comment.like_count : '赞'}</span>
                       </button>
-                      <button
-                        onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        回复
-                      </button>
                       {(user?.is_admin || comment.user_id === user?.id) && (
                         <button
                           onClick={() => deleteMutation.mutate(comment.id)}
@@ -240,6 +403,7 @@ export default function CommentPanel({
                         </button>
                       )}
                     </div>
+                    <ReplySection comment={comment} documentId={documentId} currentUser={user} />
                   </div>
                 </div>
               </div>
@@ -297,12 +461,6 @@ export default function CommentPanel({
                                 <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
                                 <span>{comment.like_count > 0 ? comment.like_count : '赞'}</span>
                               </button>
-                              <button
-                                onClick={() => { setReplyTo(comment); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                回复
-                              </button>
                               {(user?.is_admin || comment.user_id === user?.id) && (
                                 <button
                                   onClick={() => deleteMutation.mutate(comment.id)}
@@ -312,6 +470,7 @@ export default function CommentPanel({
                                 </button>
                               )}
                             </div>
+                            <ReplySection comment={comment} documentId={documentId} currentUser={user} />
                           </div>
                         </div>
                       </div>
@@ -347,12 +506,6 @@ export default function CommentPanel({
               <button onClick={onClearSelection} className="shrink-0 hover:text-foreground">
                 <X className="h-3 w-3" />
               </button>
-            </div>
-          )}
-          {replyTo && (
-            <div className="flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 text-xs text-blue-600">
-              <span className="flex-1">回复 {replyTo.username || '匿名用户'}</span>
-              <button onClick={() => setReplyTo(null)}><X className="h-3 w-3" /></button>
             </div>
           )}
           <div className="flex items-end gap-2">
