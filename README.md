@@ -53,7 +53,6 @@ reading/
 │   ├── nginx/      # Nginx 配置
 │   └── postgres/   # 数据库初始化 SQL
 ├── docker-compose.yml
-├── docker-compose.dev.yml
 ├── docker-compose.prod.yml
 └── pnpm-workspace.yaml
 ```
@@ -62,29 +61,9 @@ reading/
 
 ### 环境要求
 
-- Node.js ≥ 20
-- pnpm ≥ 9
 - Docker & Docker Compose
 
-### 本地开发
-
-```bash
-# 安装依赖
-pnpm install
-
-# 启动基础设施（PostgreSQL / Redis / Qdrant）
-docker compose -f docker-compose.dev.yml up -d
-
-# 启动所有服务（热重载）
-pnpm dev
-```
-
-访问地址：
-- 前端：http://localhost:5173
-- API：http://localhost:3000
-- API 文档：http://localhost:3000/docs
-
-### 生产部署
+### 部署
 
 ```bash
 # 复制并填写环境变量

@@ -4,20 +4,11 @@
   "private": true,
   "description": "跨文档协同评论系统 - 评论跟着内容走",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
-    "dev:api": "pnpm --filter @collab/api dev",
-    "dev:web": "pnpm --filter @collab/web dev",
-    "dev:worker": "pnpm --filter @collab/worker dev",
     "build": "pnpm -r build",
     "build:api": "pnpm --filter @collab/api build",
     "build:web": "pnpm --filter @collab/web build",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
-    "db:migrate": "pnpm --filter @collab/api db:migrate",
-    "db:seed": "pnpm --filter @collab/api db:seed",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:logs": "docker-compose logs -f"
+    "test": "pnpm -r test"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
