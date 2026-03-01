@@ -92,10 +92,12 @@ function ReplySection({
     },
   });
 
-  // 回复点赞（乐观更新）
+  // 回复点赞（乐观更新 + 快照回滚）
   const likeMutation = useMutation({
     mutationFn: (replyId: string) => api.likeComment(replyId),
     onMutate: async (replyId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['replies', comment.id] });
+      const previous = queryClient.getQueryData<{ replies: Comment[] }>(['replies', comment.id]);
       queryClient.setQueryData(['replies', comment.id], (old: { replies: Comment[] } | undefined) => {
         if (!old) return old;
         return {
@@ -106,9 +108,22 @@ function ReplySection({
           ),
         };
       });
+      return { previous };
     },
-    onError: () => {
-      queryClient.invalidateQueries({ queryKey: ['replies', comment.id] });
+    onError: (_err, _replyId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['replies', comment.id], context.previous);
+      }
+    },
+    onSuccess: (data, replyId) => {
+      queryClient.setQueryData(['replies', comment.id], (old: { replies: Comment[] } | undefined) => {
+        if (!old) return old;
+        return {
+          replies: old.replies.map((r) =>
+            r.id === replyId ? { ...r, liked_by_me: data.liked, like_count: data.likeCount } : r
+          ),
+        };
+      });
     },
   });
 
@@ -433,11 +448,11 @@ export default function CommentPanel({
                         onClick={() => likeMutation.mutate(comment.id)}
                         className={cn(
                           'flex items-center gap-1 text-xs transition-colors',
-                          comment.liked_by_me ? 'text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+                          comment.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
                         )}
                       >
                         <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
-                        <span>{comment.like_count > 0 ? comment.like_count : '赞'}</span>
+                        {comment.like_count > 0 && <span>{comment.like_count}</span>}
                       </button>
                       {(user?.is_admin || comment.user_id === user?.id) && (
                         <button
@@ -500,11 +515,11 @@ export default function CommentPanel({
                                 onClick={() => likeMutation.mutate(comment.id)}
                                 className={cn(
                                   'flex items-center gap-1 text-xs transition-colors',
-                                  comment.liked_by_me ? 'text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+                                  comment.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
                                 )}
                               >
                                 <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
-                                <span>{comment.like_count > 0 ? comment.like_count : '赞'}</span>
+                                {comment.like_count > 0 && <span>{comment.like_count}</span>}
                               </button>
                               {(user?.is_admin || comment.user_id === user?.id) && (
                                 <button
