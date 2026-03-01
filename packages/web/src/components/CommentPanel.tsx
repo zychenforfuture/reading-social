@@ -62,26 +62,10 @@ function ReplySection({
   const replyMutation = useMutation({
     mutationFn: (content: string) =>
       api.createReply(comment.id, content, undefined),
-    onSuccess: (res) => {
+    onSuccess: () => {
       setText('');
       setShowInput(false);
-      // 追加到本地缓存
-      queryClient.setQueryData(['replies', comment.id], (old: { replies: Comment[] } | undefined) => ({
-        replies: [...(old?.replies ?? []), res.comment],
-      }));
-      // 更新根评论 reply_count
-      queryClient.setQueryData(
-        ['document-comments', documentId],
-        (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
-          if (!old) return old;
-          return {
-            ...old,
-            comments: old.comments.map((c) =>
-              c.id === comment.id ? { ...c, reply_count: c.reply_count + 1 } : c
-            ),
-          };
-        }
-      );
+      // 列表和 reply_count 由 SSE new_reply 统一更新，避免发送者本人重复追加
     },
   });
 
