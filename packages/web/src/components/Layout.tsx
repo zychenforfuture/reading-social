@@ -21,7 +21,7 @@ export default function Layout() {
           <div className="mr-4 flex">
             <Link to="/" className="mr-6 flex items-center space-x-2">
               <FileText className="h-6 w-6" />
-              <span className="font-bold">Collab Comments</span>
+              <span className="font-bold">共鸣阅读</span>
             </Link>
             <nav className="flex items-center space-x-6 text-sm font-medium">
               <Link to="/" className="transition-colors hover:text-foreground/80 text-foreground/60">

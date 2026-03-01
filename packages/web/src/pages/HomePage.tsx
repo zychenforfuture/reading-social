@@ -115,7 +115,7 @@ export default function HomePage() {
   if (!isAuthenticated) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <h1 className="text-4xl font-bold mb-4">欢迎使用 Collab Comments</h1>
+        <h1 className="text-4xl font-bold mb-4">欢迎使用 共鸣阅读</h1>
         <p className="text-muted-foreground mb-8 text-center max-w-md">
           跨文档协同评论系统 - 评论跟着内容走，而不是跟着文档走
         </p>
