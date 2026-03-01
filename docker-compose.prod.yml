@@ -75,6 +75,7 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     depends_on:
       postgres:
         condition: service_healthy

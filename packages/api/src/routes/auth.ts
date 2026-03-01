@@ -34,9 +34,36 @@ async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);
     `);
     logger.info('Auth migration: email_verified + email_otps ready');
+
+    // 同步管理员状态
+    await syncAdminEmails();
   } catch (err) {
     logger.error('Auth migration error:', err);
   }
+}
+
+// 从环境变量同步管理员邮箱列表
+async function syncAdminEmails() {
+  const raw = process.env.ADMIN_EMAILS || '';
+  const adminEmails = raw
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (adminEmails.length === 0) return;
+
+  // 将列表内邮箱设为管理员
+  await pool.query(
+    `UPDATE users SET is_admin = true WHERE LOWER(email) = ANY($1::text[])`,
+    [adminEmails]
+  );
+  // 将不在列表中的邮箱取消管理员
+  await pool.query(
+    `UPDATE users SET is_admin = false WHERE LOWER(email) != ALL($1::text[])`,
+    [adminEmails]
+  );
+
+  logger.info(`Admin emails synced: ${adminEmails.join(', ')}`);
 }
 
 runMigration();
@@ -139,19 +166,26 @@ router.post('/register', async (req, res) => {
     // 清除 OTP
     await pool.query('DELETE FROM email_otps WHERE email = $1 AND purpose = $2', [email, 'register']);
 
+    // 判断是否为预设管理员
+    const adminEmails = (process.env.ADMIN_EMAILS || '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const isAdmin = adminEmails.includes(email.toLowerCase());
+
     if (existing.rows.length > 0) {
       // 已存在未验证的用户，更新并标记验证
       await pool.query(
         `UPDATE users SET username = $1, password_hash = $2, email_verified = true,
-         verification_token = NULL, verification_token_expires = NULL
+         is_admin = $4, verification_token = NULL, verification_token_expires = NULL
          WHERE email = $3`,
-        [username, `$hashed$${password}`, email]
+        [username, `$hashed$${password}`, email, isAdmin]
       );
     } else {
       await pool.query(
-        `INSERT INTO users (email, username, password_hash, email_verified)
-         VALUES ($1, $2, $3, true)`,
-        [email, username, `$hashed$${password}`]
+        `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
+         VALUES ($1, $2, $3, true, $4)`,
+        [email, username, `$hashed$${password}`, isAdmin]
       );
     }
 
