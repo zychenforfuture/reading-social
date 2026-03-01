@@ -1,45 +1,60 @@
-# 跨文档协同评论系统
+# 共鸣阅读
 
 > 评论跟着内容走，而不是跟着文档走
 
-## 项目简介
+一个面向阅读社群的跨文档协同批注平台。上传文章、为任意段落发表评论、与他人互动点赞回复——当同一段文字出现在多篇文档中时，所有读者的批注都会自动汇聚在一起。
 
-这是一个基于内容指纹的跨文档协同评论系统。当同一段内容出现在不同文档中时，针对该内容的评论能自动同步显示。
+## 功能亮点
 
-## 核心特性
-
-- **内容指纹**: 基于 SHA-256 哈希的内容识别
-- **跨文档同步**: 评论自动同步到所有包含相同内容的文档
-- **大文件优化**: 支持 10MB+ 文件的流式处理
-- **模糊匹配**: SimHash + 向量嵌入的语义匹配
-- **实时协作**: Yjs + WebSocket 的多人协作编辑
+| 功能 | 说明 |
+|------|------|
+| **内容指纹批注** | 基于 SHA-256 对段落内容进行哈希，评论绑定内容而非文档路径 |
+| **跨文档同步** | 同一段落在不同文档中的批注自动聚合展示 |
+| **评论 · 回复 · 点赞** | 多层嵌套结构，支持 @mention，点赞实时反弹 |
+| **章节评论汇总** | 文档底部按章节汇总全部批注，脱离右侧面板也可浏览 |
+| **语义相似推荐** | 基于向量嵌入（Qdrant）推荐语义相近的段落及其批注 |
+| **大文件处理** | 10 MB+ 文档通过 Web Worker + BullMQ 异步解析，不阻塞主线程 |
+| **邮箱 OTP 注册** | 注册和重置密码均通过 6 位验证码完成，无需点击链接 |
+| **管理员权限** | 管理员可上传文档、查看上传者信息 |
 
 ## 技术栈
 
-### 前端
-- React 18 + TypeScript + Vite
-- Tiptap (富文本编辑器)
-- Zustand + TanStack Query
-- Yjs (实时协作)
-- Tailwind CSS + shadcn/ui
+### 前端（`packages/web`）
+- **React 18** + TypeScript + Vite
+- **TanStack Query** — 服务端状态与乐观更新
+- **Zustand** — 客户端用户状态持久化
+- **Tailwind CSS** — 样式
+- **Web Worker** — 大文件客户端预处理
 
-### 后端
-- Node.js + TypeScript + Express
-- PostgreSQL (元数据)
-- Redis (缓存/队列)
-- Qdrant (向量索引)
-- BullMQ (任务队列)
+### 后端（`packages/api`）
+- **Node.js** + TypeScript + Express
+- **PostgreSQL** — 用户、文档、评论元数据
+- **Redis** + **BullMQ** — 文件处理任务队列
+- **Qdrant** — 段落向量索引与相似搜索
+- **Nodemailer** — 阿里云 SMTP 发送 OTP 邮件
+- **SSE**（Server-Sent Events）— 文件处理进度实时推送
+
+### Worker（`packages/worker`）
+- BullMQ Worker，负责文档解析、段落切割、向量入库
+
+### 基础设施
+- **Docker Compose** — 一键本地 / 生产部署
+- **Nginx** — 前端静态托管 + API 反代
 
 ## 项目结构
 
 ```
-cross-doc-comments/
+reading/
 ├── packages/
-│   ├── api/       # API 服务 (Express)
-│   ├── web/       # 前端应用 (React + Vite)
-│   └── worker/    # 后台 Worker (BullMQ)
+│   ├── api/        # Express API 服务
+│   ├── web/        # React 前端
+│   └── worker/     # BullMQ 后台工作进程
+├── docker/
+│   ├── nginx/      # Nginx 配置
+│   └── postgres/   # 数据库初始化 SQL
 ├── docker-compose.yml
-├── package.json
+├── docker-compose.dev.yml
+├── docker-compose.prod.yml
 └── pnpm-workspace.yaml
 ```
 
@@ -47,57 +62,68 @@ cross-doc-comments/
 
 ### 环境要求
 
-- Node.js >= 20.0.0
-- pnpm >= 9.0.0
+- Node.js ≥ 20
+- pnpm ≥ 9
 - Docker & Docker Compose
 
-### 安装
+### 本地开发
 
 ```bash
 # 安装依赖
 pnpm install
 
-# 启动基础设施 (PostgreSQL, Redis, Qdrant)
-pnpm docker:up
+# 启动基础设施（PostgreSQL / Redis / Qdrant）
+docker compose -f docker-compose.dev.yml up -d
 
-# 运行数据库迁移
-pnpm db:migrate
-
-# 启动所有服务
+# 启动所有服务（热重载）
 pnpm dev
 ```
 
-### 访问
-
+访问地址：
 - 前端：http://localhost:5173
-- API: http://localhost:3000
-- API Swagger: http://localhost:3000/docs
+- API：http://localhost:3000
+- API 文档：http://localhost:3000/docs
 
-## 开发指南
-
-### 单独启动服务
+### 生产部署
 
 ```bash
-# 仅启动 API
-pnpm dev:api
+# 复制并填写环境变量
+cp .env.production.example .env.production
 
-# 仅启动前端
-pnpm dev:web
-
-# 仅启动 Worker
-pnpm dev:worker
+# 一键构建并启动
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
-### 构建
+`.env.production` 需配置的关键变量：
 
-```bash
-# 构建所有
-pnpm build
+```env
+DB_PASSWORD=
+REDIS_PASSWORD=
+JWT_SECRET=
+FRONTEND_URL=https://your-domain.com
 
-# 构建单个服务
-pnpm build:api
-pnpm build:web
+# 阿里云 SMTP（邮箱验证码）
+SMTP_HOST=smtpdm.aliyun.com
+SMTP_PORT=465
+SMTP_USER=your@domain.com
+SMTP_PASS=
+SMTP_FROM=your@domain.com
 ```
+
+## 页面路由
+
+| 路径 | 说明 |
+|------|------|
+| `/login` | 登录 |
+| `/register` | 注册（邮箱 OTP 验证） |
+| `/forgot-password` | 重置密码（邮箱 OTP 验证） |
+| `/` | 文档列表首页 |
+| `/documents/:id` | 文档阅读 & 批注页 |
+
+## License
+
+MIT
+
 
 ## 许可证
 
