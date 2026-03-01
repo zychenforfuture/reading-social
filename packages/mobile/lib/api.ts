@@ -54,7 +54,7 @@ export const auth = {
 export const documents = {
   list: () =>
     request<{ documents: Document[] }>('/documents').then((r) => r.documents),
-  get: (id: number) =>
+  get: (id: string) =>
     request<{ document: Document; content: RawBlock[] }>(`/documents/${id}`).then(
       (r) => ({
         ...r.document,
@@ -69,6 +69,9 @@ export const documents = {
         })),
       }) as DocumentDetail
     ),
+  getBlockCommentCounts: (id: string) =>
+    request<{ blockCommentCount: Record<string, number> }>(`/documents/${id}/comments`)
+      .then((r) => r.blockCommentCount),
   upload: async (formData: FormData) => {
     const token = await getToken();
     const res = await fetch(`${BASE_URL}/documents`, {
@@ -127,7 +130,7 @@ export interface User {
 }
 
 export interface Document {
-  id: number;
+  id: string;
   title: string;
   author?: string;
   word_count?: number;
