@@ -37,9 +37,30 @@ async function runMigration() {
 
     // 同步管理员状态
     await syncAdminEmails();
+    // 创建初始管理员
+    await createInitialAdmin();
   } catch (err) {
     logger.error('Auth migration error:', err);
   }
+}
+
+// 根据环境变量自动创建初始管理员账号
+async function createInitialAdmin() {
+  const email = process.env.ADMIN_INIT_EMAIL?.trim();
+  const username = process.env.ADMIN_INIT_USERNAME?.trim();
+  const password = process.env.ADMIN_INIT_PASSWORD?.trim();
+
+  if (!email || !username || !password) return;
+
+  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+  if (existing.rows.length > 0) return; // 已存在，跳过
+
+  await pool.query(
+    `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
+     VALUES ($1, $2, $3, true, true)`,
+    [email, username, `$hashed$${password}`]
+  );
+  logger.info(`Initial admin created: ${email} (${username})`);
 }
 
 // 从环境变量同步管理员邮箱列表

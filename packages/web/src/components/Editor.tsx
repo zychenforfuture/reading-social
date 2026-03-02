@@ -17,14 +17,19 @@ interface Tooltip {
   text: string;
 }
 
+// 章节标题识别正则
+const CHAPTER_RE = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇部]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+|序章|终章|后记|前言|楔子|尾声)/i;
+// 短标题行（≤25字且不含标点密集内容）
+const isHeadingLine = (line: string) => {
+  const t = line.trim();
+  return t.length > 0 && (CHAPTER_RE.test(t) || (t.length <= 25 && !/[，。！？；：""''、]{2,}/.test(t) && /^[\u4e00-\u9fa5a-zA-Z0-9\s·《》【】（）\-—]+$/.test(t)));
+};
+
 export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble }: EditorProps) {
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 章节切换时清除 tooltip
-  useEffect(() => {
-    setTooltip(null);
-  }, [content]);
+  useEffect(() => { setTooltip(null); }, [content]);
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
@@ -32,42 +37,22 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
       setTooltip(null);
       return;
     }
-
     const selectedText = selection.toString().trim();
     const anchorNode = selection.anchorNode;
-    if (!anchorNode || !containerRef.current) {
-      setTooltip(null);
-      return;
-    }
+    if (!anchorNode || !containerRef.current) { setTooltip(null); return; }
 
-    // 找到最近的带有 data-block-hash 属性的祖先元素
     let node: Node | null = anchorNode;
-    while (node && node.nodeType !== Node.ELEMENT_NODE) {
-      node = node.parentNode;
-    }
+    while (node && node.nodeType !== Node.ELEMENT_NODE) node = node.parentNode;
     let el = node as Element | null;
-    while (el && !el.hasAttribute('data-block-hash')) {
-      el = el.parentElement;
-    }
-
-    if (!el || !containerRef.current.contains(el)) {
-      setTooltip(null);
-      return;
-    }
+    while (el && !el.hasAttribute('data-block-hash')) el = el.parentElement;
+    if (!el || !containerRef.current.contains(el)) { setTooltip(null); return; }
 
     const blockHash = el.getAttribute('data-block-hash')!;
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
-
-    setTooltip({
-      x: rect.left + rect.width / 2,
-      y: rect.top,
-      blockHash,
-      text: selectedText,
-    });
+    setTooltip({ x: rect.left + rect.width / 2, y: rect.top, blockHash, text: selectedText });
   }, []);
 
-  // 滚动时隐藏 tooltip
   useEffect(() => {
     const hide = () => setTooltip(null);
     window.addEventListener('scroll', hide, true);
@@ -75,41 +60,86 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
   }, []);
 
   return (
-    <div className="border rounded-lg bg-card" ref={containerRef}>
-      <div className="border-b px-4 py-2 bg-muted/50">
-        <span className="text-sm text-muted-foreground">
-          <span className="text-xs opacity-60">选中文字可发表评论</span>
-        </span>
+    <div
+      ref={containerRef}
+      className="relative bg-white rounded-2xl shadow-sm"
+      style={{ fontFamily: '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", "Source Han Sans CN", sans-serif' }}
+    >
+      {/* 顶部提示 */}
+      <div className="flex justify-end px-8 pt-5 pb-0">
+        <span className="text-xs text-gray-300 select-none">选中文字可发表评论</span>
       </div>
 
       {/* 正文渲染区 */}
       <div
-        className="min-h-[500px] px-6 py-5 select-text"
+        className="min-h-[500px] select-text"
+        style={{ padding: '2rem 3.5rem 4rem' }}
         onMouseUp={handleMouseUp}
       >
-        {content.map((block) => {
+        {content.map((block, blockIdx) => {
           const totalCount = blockCommentCount[block.block_hash] ?? 0;
           const blockComments = comments.filter(c => c.block_hash === block.block_hash);
+          const lines = block.raw_content.split('\n').filter(l => l.trim() !== '' || block.raw_content.trim() === '');
 
-          // 按 \n 拆成子段落
-          const lines = block.raw_content.split('\n');
+          // 空白块作分隔
+          if (block.raw_content.trim() === '') {
+            return <div key={block.block_hash} style={{ height: '1.2em' }} />;
+          }
 
-          // 按行收集评论 ID：selected_text 落在哪行，该评论 ID 就归到那行
-          // 没有 selected_text 或找不到所在行的评论，归到最后一行
           const lineCommentIds: string[][] = lines.map(() => []);
           for (const c of blockComments) {
             let placed = false;
             if (c.selected_text) {
               const probe = c.selected_text.trim().substring(0, 20);
               const idx = lines.findIndex(l => l.includes(probe));
-              if (idx >= 0) {
-                lineCommentIds[idx].push(c.id);
-                placed = true;
-              }
+              if (idx >= 0) { lineCommentIds[idx].push(c.id); placed = true; }
             }
-            if (!placed) {
-              lineCommentIds[lines.length - 1].push(c.id);
-            }
+            if (!placed) lineCommentIds[lines.length - 1].push(c.id);
+          }
+
+          // 判断整段是否为标题块：单行且符合标题规则，或首行匹配 CHAPTER_RE
+          const firstLine = lines[0]?.trim() ?? '';
+          const isSingleHeading = lines.length === 1 && isHeadingLine(firstLine);
+          const isChapterHeading = CHAPTER_RE.test(firstLine);
+
+          if (isSingleHeading) {
+            return (
+              <div
+                key={block.block_hash}
+                data-block-hash={block.block_hash}
+                className={[
+                  'transition-colors duration-300',
+                  isChapterHeading ? 'mt-10 mb-6' : 'mt-6 mb-4',
+                  totalCount > 0 ? 'rounded' : '',
+                ].join(' ')}
+              >
+                <p
+                  className={[
+                    'text-center font-bold text-gray-900 break-words',
+                    isChapterHeading ? 'text-xl tracking-widest' : 'text-base tracking-wide',
+                    totalCount > 0 ? 'bg-amber-50 px-2 rounded' : '',
+                  ].join(' ')}
+                  style={{ lineHeight: '2.2' }}
+                >
+                  {firstLine}
+                  {lineCommentIds[0]?.length > 0 && (
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[0]); }}
+                      className="inline-flex items-center justify-center ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none align-middle transition-colors cursor-pointer select-none"
+                    >
+                      {lineCommentIds[0].length}
+                    </button>
+                  )}
+                </p>
+                {/* 章节标题下方分隔线 */}
+                {isChapterHeading && (
+                  <div className="flex justify-center mt-3 mb-1">
+                    <span className="block w-12 h-px bg-gray-200" />
+                  </div>
+                )}
+              </div>
+            );
           }
 
           return (
@@ -117,34 +147,47 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
               key={block.block_hash}
               data-block-hash={block.block_hash}
               className={[
-              'mb-5 transition-colors duration-300',
-              totalCount > 0 ? 'bg-yellow-50 dark:bg-yellow-900/20 rounded px-1' : '',
-            ].join(' ')}
+                'transition-colors duration-300',
+                totalCount > 0 ? 'bg-amber-50/60 rounded-sm' : '',
+                blockIdx > 0 ? '' : '',
+              ].join(' ')}
             >
-              {lines.map((line, lineIdx) => (
-                <p
-                  key={lineIdx}
-                  className="leading-8 text-base text-foreground break-words"
-                >
-                  {line}
-                  {lineCommentIds[lineIdx].length > 0 && (
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[lineIdx]); }}
-                      className="inline-flex items-center justify-center ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none align-middle transition-colors cursor-pointer select-none"
-                      style={{ verticalAlign: 'middle' }}
-                    >
-                      {lineCommentIds[lineIdx].length}
-                    </button>
-                  )}
-                </p>
-              ))}
+              {lines.map((line, lineIdx) => {
+                const trimmed = line.trim();
+                // 对话行以 " " 开头
+                const isDialogue = trimmed.startsWith('\u201c') || trimmed.startsWith('\u2018') || trimmed.startsWith('"') || trimmed.startsWith('\u300c');
+                return (
+                  <p
+                    key={lineIdx}
+                    className="text-gray-800 break-words"
+                    style={{
+                      fontSize: '17px',
+                      lineHeight: '2.0',
+                      textIndent: '2em',
+                      marginBottom: isDialogue ? '0' : '0.1em',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {trimmed}
+                    {lineCommentIds[lineIdx].length > 0 && (
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[lineIdx]); }}
+                        className="inline-flex items-center justify-center ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none align-middle transition-colors cursor-pointer select-none"
+                        style={{ verticalAlign: 'middle' }}
+                      >
+                        {lineCommentIds[lineIdx].length}
+                      </button>
+                    )}
+                  </p>
+                );
+              })}
             </div>
           );
         })}
       </div>
 
-      {/* 浮动评论按钮 */}
+      {/* 浮动评论气泡 */}
       {tooltip && (
         <div
           style={{
@@ -154,9 +197,9 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
             transform: 'translateX(-50%) translateY(-100%)',
             zIndex: 50,
           }}
-          className="bg-popover border rounded-md shadow-lg px-3 py-1.5 flex items-center gap-1.5"
+          className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-1.5"
         >
-          <MessageSquare className="h-3.5 w-3.5 text-primary" />
+          <MessageSquare className="h-3.5 w-3.5 text-orange-500" />
           <button
             onMouseDown={(e) => {
               e.preventDefault();
@@ -164,7 +207,8 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
               setTooltip(null);
               window.getSelection()?.removeAllRanges();
             }}
-            className="text-sm font-medium text-primary whitespace-nowrap hover:underline"
+            className="text-sm font-medium text-orange-500 whitespace-nowrap hover:underline"
+            style={{ fontFamily: 'system-ui, sans-serif' }}
           >
             评论选中文字
           </button>
@@ -178,7 +222,7 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
               height: 0,
               borderLeft: '6px solid transparent',
               borderRight: '6px solid transparent',
-              borderTop: '6px solid hsl(var(--border))',
+              borderTop: '6px solid #e5e7eb',
             }}
           />
         </div>

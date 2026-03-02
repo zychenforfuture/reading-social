@@ -15,7 +15,7 @@ export const api: {
   sendCode: (email: string, purpose: 'register' | 'reset_password') => Promise<{ message: string }>;
   resetPassword: (email: string, code: string, password: string) => Promise<{ message: string }>;
   getDocuments: () => Promise<{ documents: Document[] }>;
-  getDocument: (id: string) => Promise<{ document: Document; content: ContentBlock[] }>;
+  getDocument: (id: string, offset?: number, limit?: number) => Promise<{ document: Document; content: ContentBlock[]; pagination: { offset: number; limit: number; total: number; hasMore: boolean } }>;
   getDocumentComments: (id: string) => Promise<{ comments: Comment[]; blockCommentCount: Record<string, number> }>;
   createDocument: (title: string, content: string) => Promise<{ document: Document }>;
   deleteDocument: (id: string) => Promise<unknown>;
@@ -86,7 +86,10 @@ export const api: {
 
   // Documents
   getDocuments: () => api.request<{ documents: Document[] }>('/documents'),
-  getDocument: (id: string) => api.request<{ document: Document; content: ContentBlock[] }>(`/documents/${id}`),
+  getDocument: (id: string, offset = 0, limit = 5000) =>
+    api.request<{ document: Document; content: ContentBlock[]; pagination: { offset: number; limit: number; total: number; hasMore: boolean } }>(
+      `/documents/${id}?offset=${offset}&limit=${limit}`
+    ),
   getDocumentComments: (id: string) =>
     api.request<{ comments: Comment[]; blockCommentCount: Record<string, number> }>(`/documents/${id}/comments`),
   createDocument: (title: string, content: string) =>

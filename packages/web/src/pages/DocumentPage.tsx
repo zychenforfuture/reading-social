@@ -1,8 +1,8 @@
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, BookOpen, MessageSquare, ThumbsUp } from 'lucide-react';
-import { api, type ContentBlock, type Comment, timeAgo, cn } from '../lib/utils';
+import { api, type ContentBlock, type Comment, type Document as DocEntry, timeAgo, cn } from '../lib/utils';
 import Editor from '../components/Editor';
 import CommentPanel, { Avatar, ReplySection } from '../components/CommentPanel';
 import TableOfContents, { type Chapter } from '../components/TableOfContents';
@@ -19,21 +19,29 @@ function buildChapters(blocks: ContentBlock[], blockCommentCount: Record<string,
   const headingIndexes: number[] = [];
   blocks.forEach((b, i) => {
     const firstLine = b.raw_content.split('\n')[0]?.trim() ?? '';
-    if (CHAPTER_RE.test(firstLine) || (firstLine.length <= 40 && firstLine.length > 0 && i > 0)) {
-      // 额外条件：短行且非首块也视为标题候选，但只保留匹配正则的
-      if (CHAPTER_RE.test(firstLine)) headingIndexes.push(i);
-    }
+    if (CHAPTER_RE.test(firstLine)) headingIndexes.push(i);
   });
 
-  // 如果检测到至少 2 个章节标题，按标题切分
-  if (headingIndexes.length >= 2) {
-    return headingIndexes.map((start, idx) => {
+  // 如果检测到至少 1 个章节标题，按标题切分
+  if (headingIndexes.length >= 1) {
+    const chapters: Chapter[] = [];
+
+    // 第一章标题前若有内容，单独作为"前言"章节
+    if (headingIndexes[0] > 0) {
+      const preBlocks = blocks.slice(0, headingIndexes[0]);
+      const commentCount = preBlocks.reduce((s, b) => s + (blockCommentCount[b.block_hash] || 0), 0);
+      chapters.push({ index: 0, title: '前言', blockStart: 0, blockCount: headingIndexes[0], commentCount });
+    }
+
+    headingIndexes.forEach((start, idx) => {
       const end = headingIndexes[idx + 1] ?? blocks.length;
       const title = blocks[start]!.raw_content.split('\n')[0]!.trim();
       const chBlocks = blocks.slice(start, end);
       const commentCount = chBlocks.reduce((s, b) => s + (blockCommentCount[b.block_hash] || 0), 0);
-      return { index: idx, title, blockStart: start, blockCount: end - start, commentCount };
+      chapters.push({ index: chapters.length, title, blockStart: start, blockCount: end - start, commentCount });
     });
+
+    return chapters.map((c, i) => ({ ...c, index: i }));
   }
 
   // 否则按每 20 块自动分章
@@ -224,12 +232,61 @@ export default function DocumentPage() {
   const [showTOC, setShowTOC] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [focusCommentIds, setFocusCommentIds] = useState<string[] | null>(null);
+  // 记录文档切换时保存的章节索引，等章节列表建立后恢复
+  const savedChapterRef = useRef(0);
+  // 每篇文档只恢复一次，避免后续批量加载时反复跳转
+  const restoredRef = useRef(false);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['document', id],
-    queryFn: () => api.getDocument(id!),
-    enabled: !!id,
-  });
+  // 文档切换时读取上次阅读位置
+  useEffect(() => {
+    if (!id) return;
+    setCurrentChapter(0);
+    restoredRef.current = false;
+    try {
+      const saved = localStorage.getItem(`doc-chapter-${id}`);
+      savedChapterRef.current = saved ? parseInt(saved, 10) : 0;
+    } catch {
+      savedChapterRef.current = 0;
+    }
+  }, [id]);
+
+  // 分批加载所有块
+  const [allBlocks, setAllBlocks] = useState<ContentBlock[]>([]);
+  const [docMeta, setDocMeta] = useState<DocEntry | null>(null);
+  const [loadingBlocks, setLoadingBlocks] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setAllBlocks([]);
+    setDocMeta(null);
+    setLoadingBlocks(true);
+
+    const BATCH = 5000;
+    const loadAll = async () => {
+      let offset = 0;
+      let accumulated: ContentBlock[] = [];
+      let firstBatch = true;
+      while (true) {
+        const res = await api.getDocument(id, offset, BATCH);
+        if (cancelled) return;
+        if (firstBatch) { setDocMeta(res.document); firstBatch = false; }
+        accumulated = accumulated.concat(res.content);
+        setAllBlocks([...accumulated]);
+        if (!res.pagination.hasMore) break;
+        offset += BATCH;
+      }
+      setLoadingBlocks(false);
+    };
+
+    loadAll().catch(() => { if (!cancelled) setLoadingBlocks(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // data shim 供下方代码复用
+  const data = docMeta ? { document: docMeta, content: allBlocks } : null;
+  const isLoading = loadingBlocks && allBlocks.length === 0;
 
   const { data: commentsData } = useQuery({
     queryKey: ['document-comments', id],
@@ -329,7 +386,6 @@ export default function DocumentPage() {
     };
   }, [id, queryClient]);
 
-  const allBlocks = data?.content ?? [];
   const blockCommentCount = commentsData?.blockCommentCount ?? {};
 
   const chapters = useMemo(
@@ -337,16 +393,30 @@ export default function DocumentPage() {
     [allBlocks, blockCommentCount],
   );
 
+  // 章节列表首次建立（或文档切换后重建）时，恢复上次阅读位置
+  useEffect(() => {
+    if (chapters.length === 0) { restoredRef.current = false; return; }
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const target = Math.max(0, Math.min(chapters.length - 1, savedChapterRef.current));
+    if (target > 0) {
+      setCurrentChapter(target);
+      window.scrollTo({ top: 0 });
+    }
+  }, [chapters.length]);
+
   const chapter = chapters[currentChapter];
   const chapterBlocks = chapter
     ? allBlocks.slice(chapter.blockStart, chapter.blockStart + chapter.blockCount)
     : allBlocks;
 
   const goTo = (idx: number) => {
-    setCurrentChapter(Math.max(0, Math.min(chapters.length - 1, idx)));
+    const target = Math.max(0, Math.min(chapters.length - 1, idx));
+    setCurrentChapter(target);
     setSelectedBlock(null);
     setShowComments(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    try { if (id) localStorage.setItem(`doc-chapter-${id}`, String(target)); } catch {}
   };
 
   const allComments = commentsData?.comments ?? [];
@@ -362,6 +432,7 @@ export default function DocumentPage() {
 
   return (
     <div className="space-y-4">
+      {/* 后台继续加载，不显示进度提示 */}
       {/* 标题行 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold truncate flex-1 pr-4">{data.document.title}</h1>
@@ -408,7 +479,7 @@ export default function DocumentPage() {
           >
             {chapter?.title ?? ''}
             <span className="text-xs text-muted-foreground font-normal ml-2">
-              {currentChapter + 1} / {chapters.length}
+              {currentChapter + 1} / {loadingBlocks ? '…' : chapters.length}
             </span>
           </button>
 
@@ -440,10 +511,10 @@ export default function DocumentPage() {
         }}
       />
 
-      {/* 评论抽屉 */}
+      {/* 评论抽屉：只显示当前章节的评论 */}
       <CommentPanel
         documentId={id!}
-        comments={commentsData?.comments ?? []}
+        comments={allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
         blockCommentCount={blockCommentCount}
         selectedBlock={selectedBlock}
         onClearSelection={() => setSelectedBlock(null)}

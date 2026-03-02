@@ -69,35 +69,32 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    // 支持分页：offset + limit，默认一次最多返回 2000 块
+    const offset = Math.max(0, parseInt((req.query.offset as string) || '0', 10));
+    const limit  = Math.min(5000, Math.max(1, parseInt((req.query.limit  as string) || '2000', 10)));
 
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
-              ARRAY_AGG(db.block_hash ORDER BY db.sequence_order) as block_hashes
-       FROM documents d
-       LEFT JOIN document_blocks db ON d.id = db.document_id
-       WHERE d.id = $1
-       GROUP BY d.id`,
+    const docResult = await pool.query(
+      `SELECT id, title, word_count, block_count, status, created_at, updated_at
+       FROM documents WHERE id = $1`,
       [id]
     );
 
-    if (result.rows.length === 0) {
+    if (docResult.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    const doc = result.rows[0];
+    const doc = docResult.rows[0];
 
-    // 获取内容块
+    // 直接 JOIN，避免把数十万个 hash 塞进 ANY($1)
     const blocksResult = await pool.query(
-      'SELECT block_hash, raw_content, word_count FROM content_blocks WHERE block_hash = ANY($1)',
-      [doc.block_hashes]
+      `SELECT cb.block_hash, cb.raw_content, cb.word_count
+       FROM document_blocks db
+       JOIN content_blocks cb ON db.block_hash = cb.block_hash
+       WHERE db.document_id = $1
+       ORDER BY db.sequence_order
+       LIMIT $2 OFFSET $3`,
+      [id, limit, offset]
     );
-
-    const blocksMap = new Map(blocksResult.rows.map(b => [b.block_hash, b]));
-
-    // 构建带内容的文档
-    const content = doc.block_hashes
-      .filter((h: string) => blocksMap.has(h))
-      .map((h: string) => blocksMap.get(h));
 
     res.json({
       document: {
@@ -109,7 +106,13 @@ router.get('/:id', async (req, res) => {
         created_at: doc.created_at,
         updated_at: doc.updated_at,
       },
-      content,
+      content: blocksResult.rows,
+      pagination: {
+        offset,
+        limit,
+        total: doc.block_count,
+        hasMore: offset + limit < doc.block_count,
+      },
     });
   } catch (error) {
     logger.error('Get document error:', error);
