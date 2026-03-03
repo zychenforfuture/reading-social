@@ -111,3 +111,17 @@ body {
   left: 0;
   right: 0;
 }
+
+/* PDF.js text layer */
+.pdf-text-layer span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.pdf-text-layer span::selection,
+.pdf-text-layer ::selection {
+  background: rgba(0, 100, 255, 0.25);
+  color: transparent;
+}

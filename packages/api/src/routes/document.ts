@@ -3,6 +3,29 @@ import { z } from 'zod';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { documentQueue } from '../config/queue.js';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { createRequire } from 'module';
+
+const _require = createRequire(import.meta.url);
+const pdfParse = _require('pdf-parse') as (buf: Buffer) => Promise<{ text: string; numpages: number }>;
+
+const PDFS_DIR = process.env.PDFS_DIR || '/app/pdfs';
+if (!fs.existsSync(PDFS_DIR)) fs.mkdirSync(PDFS_DIR, { recursive: true });
+
+// multer：存内存，上传后自己写文件（需要先算 hash）
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
+      cb(null, true);
+    } else {
+      cb(new Error('只支持 PDF 文件'));
+    }
+  },
+});
 
 const router: Router = Router();
 
@@ -37,7 +60,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (isAdmin) {
       // 管理员看所有文档
       result = await pool.query(
-        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
+        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.source_type, d.created_at, d.updated_at,
                 u.username as uploader
          FROM documents d
          LEFT JOIN users u ON d.user_id = u.id
@@ -46,7 +69,7 @@ router.get('/', async (req: Request, res: Response) => {
     } else if (userId) {
       // 普通用户只看自己的
       result = await pool.query(
-        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
+        `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.source_type, d.created_at, d.updated_at,
                 u.username as uploader
          FROM documents d
          LEFT JOIN users u ON d.user_id = u.id
@@ -74,7 +97,7 @@ router.get('/:id', async (req, res) => {
     const limit  = Math.min(5000, Math.max(1, parseInt((req.query.limit  as string) || '2000', 10)));
 
     const docResult = await pool.query(
-      `SELECT id, title, word_count, block_count, status, created_at, updated_at
+      `SELECT id, title, word_count, block_count, status, source_type, created_at, updated_at
        FROM documents WHERE id = $1`,
       [id]
     );
@@ -103,6 +126,7 @@ router.get('/:id', async (req, res) => {
         word_count: doc.word_count,
         block_count: doc.block_count,
         status: doc.status,
+        source_type: doc.source_type ?? 'text',
         created_at: doc.created_at,
         updated_at: doc.updated_at,
       },
@@ -246,3 +270,106 @@ router.delete('/:id', async (req, res) => {
 });
 
 export { router as documentRoutes };
+
+// ─── PDF 相关路由（放在 export 后面，挂载到同一 router）─────────────────────
+
+// 上传 PDF 文档
+router.post('/upload-pdf', upload.single('pdf'), async (req: Request, res: Response) => {
+  try {
+    const { userId } = await getCallerInfo(req);
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!req.file) return res.status(400).json({ error: '请上传 PDF 文件' });
+
+    const fileBuffer = req.file.buffer;
+
+    // SHA-256 文件哈希（跨用户去重）
+    const crypto = await import('crypto');
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+    // 检查是否已存在
+    const existing = await pool.query(
+      'SELECT id, title FROM documents WHERE file_hash = $1',
+      [fileHash]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ document: existing.rows[0], existed: true });
+    }
+
+    // 保存 PDF 文件
+    const pdfPath = `${fileHash}.pdf`;
+    fs.writeFileSync(path.join(PDFS_DIR, pdfPath), fileBuffer);
+
+    // 用 pdf-parse 提取纯文本（供 Worker 分块）
+    const pdfData = await pdfParse(fileBuffer);
+    const rawText = pdfData.text;
+
+    // 文档标题：优先用表单 title 字段，其次用文件名
+    const title = ((req.body?.title as string) || req.file.originalname.replace(/\.pdf$/i, '')).trim();
+
+    const docResult = await pool.query(
+      `INSERT INTO documents (user_id, title, file_hash, status, content, source_type, pdf_path)
+       VALUES ($1, $2, $3, 'processing', $4, 'pdf', $5)
+       RETURNING id, created_at`,
+      [userId, title, fileHash, rawText, pdfPath]
+    );
+    const docId = docResult.rows[0].id;
+
+    // 与 TXT 走同一个 Worker 队列
+    await documentQueue.add('process-document', { documentId: docId });
+    logger.info(`PDF document queued: ${docId} (${pdfData.numpages} pages)`);
+
+    res.json({
+      document: {
+        id: docId,
+        title,
+        status: 'processing',
+        source_type: 'pdf',
+        created_at: docResult.rows[0].created_at,
+      },
+      existed: false,
+    });
+  } catch (error) {
+    logger.error('PDF upload error:', error);
+    res.status(500).json({ error: 'PDF 上传失败' });
+  }
+});
+
+// 提供 PDF 文件下载/预览
+router.get('/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT pdf_path, title FROM documents WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0 || !result.rows[0].pdf_path) {
+      return res.status(404).json({ error: 'PDF not found' });
+    }
+    const fullPath = path.join(PDFS_DIR, result.rows[0].pdf_path);
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'PDF file missing on disk' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(result.rows[0].title)}.pdf"`);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (error) {
+    logger.error('PDF serve error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── 数据库迁移（module 加载时自动执行）──────────────────────────────────────
+async function runDocumentMigration() {
+  try {
+    await pool.query(`
+      ALTER TABLE documents
+        ADD COLUMN IF NOT EXISTS source_type VARCHAR(10) DEFAULT 'text',
+        ADD COLUMN IF NOT EXISTS pdf_path TEXT;
+    `);
+    logger.info('Document migration: source_type + pdf_path ready');
+  } catch (err) {
+    logger.error('Document migration error:', err);
+  }
+}
+runDocumentMigration();

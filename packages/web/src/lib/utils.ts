@@ -30,6 +30,7 @@ export const api: {
   getBlockSimilar: (hash: string) => Promise<{ similar?: SimilarBlock[] }>;
   updateProfile: (avatarUrl: string) => Promise<{ user: User }>;
   changePassword: (oldPassword: string, newPassword: string) => Promise<{ message: string }>;
+  uploadPdf: (file: File, title?: string) => Promise<{ document: Document; existed: boolean }>;
 } = {
   // @ts-ignore - Vite 环境变量
   baseURL: import.meta.env?.VITE_API_URL || '/api',
@@ -137,6 +138,29 @@ export const api: {
     api.request<{ user: User }>('/auth/profile', { method: 'PUT', body: JSON.stringify({ avatar_url: avatarUrl }) }),
   changePassword: (oldPassword: string, newPassword: string) =>
     api.request<{ message: string }>('/auth/change-password', { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) }),
+
+  // PDF upload
+  uploadPdf: (file: File, title?: string) => {
+    const formData = new FormData();
+    formData.append('pdf', file);
+    if (title) formData.append('title', title);
+    let token: string | null = null;
+    try {
+      const stored = localStorage.getItem('collab-auth');
+      if (stored) token = JSON.parse(stored)?.state?.token ?? null;
+    } catch {}
+    return fetch(`${api.baseURL}/documents/upload-pdf`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || `Upload failed: ${res.status}`);
+      }
+      return res.json() as Promise<{ document: Document; existed: boolean }>;
+    });
+  },
 };
 
 export type User = {
@@ -153,6 +177,7 @@ export type Document = {
   word_count?: number;
   block_count?: number;
   status: 'processing' | 'ready' | 'error';
+  source_type?: 'text' | 'pdf';
   created_at: string;
   updated_at: string;
   uploader?: string;  // 仅管理员可见

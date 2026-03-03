@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, BookOpen, MessageSquare, ThumbsUp } from 'lucide-react';
 import { api, type ContentBlock, type Comment, type Document as DocEntry, timeAgo, cn } from '../lib/utils';
 import Editor from '../components/Editor';
+import PdfViewer from '../components/PdfViewer';
 import CommentPanel, { Avatar, ReplySection } from '../components/CommentPanel';
 import TableOfContents, { type Chapter } from '../components/TableOfContents';
 import { useUserStore } from '../stores/userStore';
@@ -495,21 +496,39 @@ export default function DocumentPage() {
       )}
 
       {/* 正文 */}
-      <Editor
-        content={chapterBlocks}
-        blockCommentCount={blockCommentCount}
-        comments={commentsData?.comments ?? []}
-        onSelectBlock={(hash, text) => {
-          setSelectedBlock({ hash, text });
-          setFocusCommentIds(null);
-          setShowComments(true);
-        }}
-        onClickCommentBubble={(ids) => {
-          setFocusCommentIds(ids);
-          setSelectedBlock(null);
-          setShowComments(true);
-        }}
-      />
+      {data.document.source_type === 'pdf' ? (
+        <PdfViewer
+          documentId={id!}
+          blocks={chapterBlocks}
+          blockCommentCount={blockCommentCount}
+          onSelectBlock={(hash, text) => {
+            setSelectedBlock({ hash, text });
+            setFocusCommentIds(null);
+            setShowComments(true);
+          }}
+          onClickCommentBubble={(ids) => {
+            setFocusCommentIds(ids);
+            setSelectedBlock(null);
+            setShowComments(true);
+          }}
+        />
+      ) : (
+        <Editor
+          content={chapterBlocks}
+          blockCommentCount={blockCommentCount}
+          comments={commentsData?.comments ?? []}
+          onSelectBlock={(hash, text) => {
+            setSelectedBlock({ hash, text });
+            setFocusCommentIds(null);
+            setShowComments(true);
+          }}
+          onClickCommentBubble={(ids) => {
+            setFocusCommentIds(ids);
+            setSelectedBlock(null);
+            setShowComments(true);
+          }}
+        />
+      )}
 
       {/* 评论抽屉：只显示当前章节的评论 */}
       <CommentPanel

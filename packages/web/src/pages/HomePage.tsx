@@ -16,6 +16,9 @@ export default function HomePage() {
   const [readProgress, setReadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  const pdfFileInputRef = useRef<HTMLInputElement>(null);
+  const [isPdfUploading, setIsPdfUploading] = useState(false);
+  const [pdfUploadError, setPdfUploadError] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents'],
@@ -112,6 +115,36 @@ export default function HomePage() {
     worker.postMessage({ type: 'PROCESS_FILE', file });
   };
 
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfUploadError('');
+    e.target.value = '';
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setPdfUploadError('仅支持 .pdf 格式的文件');
+      return;
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      setPdfUploadError('文件大小不能超过 200MB');
+      return;
+    }
+
+    setIsPdfUploading(true);
+    try {
+      const result = await api.uploadPdf(file);
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      if (result.existed) {
+        setPdfUploadError('该 PDF 已存在，已为您跳转到对应文档。');
+      }
+      navigate(`/documents/${result.document.id}`);
+    } catch (err: unknown) {
+      setPdfUploadError(`PDF 上传失败：${err instanceof Error ? err.message : '未知错误'}`);
+    } finally {
+      setIsPdfUploading(false);
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -145,6 +178,13 @@ export default function HomePage() {
             className="hidden"
             onChange={handleFileUpload}
           />
+          <input
+            ref={pdfFileInputRef}
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={handlePdfUpload}
+          />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={createMutation.isPending || readProgress !== null}
@@ -152,6 +192,14 @@ export default function HomePage() {
           >
             <Upload className="h-4 w-4 mr-2" />
             上传 TXT
+          </button>
+          <button
+            onClick={() => pdfFileInputRef.current?.click()}
+            disabled={isPdfUploading}
+            className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/80 bg-secondary h-9 px-4 py-2 text-secondary-foreground disabled:opacity-50"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            {isPdfUploading ? '上传中…' : '上传 PDF'}
           </button>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
@@ -166,6 +214,11 @@ export default function HomePage() {
       {uploadError && (
         <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">
           {uploadError}
+        </div>
+      )}
+      {pdfUploadError && (
+        <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">
+          {pdfUploadError}
         </div>
       )}
 

@@ -85,6 +85,8 @@ services:
         condition: service_healthy
     networks:
       - collab-network
+    volumes:
+      - ./volumes/pdfs:/app/pdfs
     logging:
       driver: "json-file"
       options:
@@ -112,6 +114,8 @@ services:
         condition: service_healthy
     networks:
       - collab-network
+    volumes:
+      - ./volumes/pdfs:/app/pdfs
     logging:
       driver: "json-file"
       options:
