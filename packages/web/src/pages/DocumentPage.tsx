@@ -431,7 +431,7 @@ export default function DocumentPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-16">
       {/* 后台继续加载，不显示进度提示 */}
       {/* 标题行 */}
       <div className="flex items-center justify-between">
@@ -463,7 +463,7 @@ export default function DocumentPage() {
 
       {/* 章节导航栏 */}
       {chapters.length > 1 && (
-        <div className="flex items-center justify-between border rounded-lg px-4 py-2 bg-muted/30 text-sm">
+        <div className="sticky bottom-0 z-30 flex items-center justify-between border rounded-lg px-4 py-2 bg-background/95 backdrop-blur shadow-[0_-2px_8px_rgba(0,0,0,0.06)] text-sm">
           <button
             onClick={() => goTo(currentChapter - 1)}
             disabled={currentChapter === 0}
