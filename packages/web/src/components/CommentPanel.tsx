@@ -15,7 +15,16 @@ interface CommentPanelProps {
   focusCommentIds?: string[] | null;
 }
 
-export function Avatar({ name }: { name: string }) {
+export function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-100"
+      />
+    );
+  }
   const colors = ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'];
   const color = colors[(name.charCodeAt(0) || 0) % colors.length];
   return (
@@ -25,7 +34,16 @@ export function Avatar({ name }: { name: string }) {
   );
 }
 
-function SmallAvatar({ name }: { name: string }) {
+function SmallAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        className="w-5 h-5 rounded-full object-cover shrink-0 border border-gray-100"
+      />
+    );
+  }
   const colors = ['bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-green-500', 'bg-rose-500', 'bg-teal-500'];
   const color = colors[(name.charCodeAt(0) || 0) % colors.length];
   return (
@@ -206,7 +224,7 @@ export function ReplySection({
           {isLoading && <p className="text-xs text-muted-foreground pl-2">加载中…</p>}
           {(data?.replies ?? []).map((reply) => (
             <div key={reply.id} className="flex gap-2 group/reply pl-2">
-              <SmallAvatar name={reply.username || '匿名'} />
+              <SmallAvatar name={reply.username || '匿名'} avatarUrl={reply.avatar_url} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-1.5 flex-wrap">
                   <span className="text-xs font-medium">{reply.username || '匿名用户'}</span>
@@ -425,7 +443,7 @@ export default function CommentPanel({
                 )}
               >
                 <div className="flex gap-2.5">
-                  <Avatar name={comment.username || '匿名'} />
+                  <Avatar name={comment.username || '匿名'} avatarUrl={comment.avatar_url} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2 mb-0.5">
                       <span className="text-sm font-medium truncate">
@@ -497,7 +515,7 @@ export default function CommentPanel({
                     {groupComments.map(comment => (
                       <div key={comment.id} className="group">
                         <div className="flex gap-2.5">
-                          <Avatar name={comment.username || '匿名'} />
+                          <Avatar name={comment.username || '匿名'} avatarUrl={comment.avatar_url} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline gap-2 mb-0.5">
                               <span className="text-sm font-medium truncate">
