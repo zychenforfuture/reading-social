@@ -273,6 +273,20 @@ export function ReplySection({
   );
 }
 
+/**
+ * 判断评论是否属于当前选中片段。
+ * groupBlocks 后多句合并为同一 block_hash，需用 selected_text 做二次过滤：
+ * 只展示 selected_text 与当前选区有文字重叠的评论（或没有 selected_text 的块级评论）。
+ */
+function matchesSelection(c: Comment, sel: { hash: string; text: string }): boolean {
+  if (c.block_hash !== sel.hash) return false;
+  if (!c.selected_text) return true; // 针对整个块的评论，也展示
+  const probe = sel.text.trim().substring(0, 15);
+  const st = c.selected_text.trim();
+  // 选区包含评论锚点，或评论锚点包含选区前缀 → 有重叠
+  return st.includes(probe) || sel.text.includes(st.substring(0, 15));
+}
+
 export default function CommentPanel({
   documentId,
   comments,
@@ -395,7 +409,7 @@ export default function CommentPanel({
               {focusCommentIds
                 ? `${focusCommentIds.length} 条`
                 : selectedBlock
-                  ? `${comments.filter(c => c.block_hash === selectedBlock.hash).length} 条`
+                  ? `${comments.filter(c => matchesSelection(c, selectedBlock)).length} 条`
                   : `${comments.length} 条`}
             </span>
           </div>
@@ -418,7 +432,7 @@ export default function CommentPanel({
             const displayComments = focusSet
               ? comments.filter(c => focusSet.has(c.id))
               : selectedBlock
-                ? comments.filter(c => c.block_hash === selectedBlock.hash)
+                ? comments.filter(c => matchesSelection(c, selectedBlock))
                 : comments;
 
             const isFocused = !!focusCommentIds || !!selectedBlock;
