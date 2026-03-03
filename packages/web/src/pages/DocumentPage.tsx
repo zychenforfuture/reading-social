@@ -535,6 +535,7 @@ export default function DocumentPage() {
         open={showComments}
         onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusCommentIds(null); }}
         focusCommentIds={focusCommentIds}
+        onClearFocus={() => setFocusCommentIds(null)}
       />
 
       {/* 本章全部评论 */}

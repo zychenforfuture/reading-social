@@ -13,6 +13,7 @@ interface CommentPanelProps {
   open: boolean;
   onClose: () => void;
   focusCommentIds?: string[] | null;
+  onClearFocus?: () => void;
 }
 
 export function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
@@ -295,6 +296,7 @@ export default function CommentPanel({
   open,
   onClose,
   focusCommentIds,
+  onClearFocus,
 }: CommentPanelProps) {
   const queryClient = useQueryClient();
   const { user } = useUserStore();
@@ -323,19 +325,25 @@ export default function CommentPanel({
     setNewComment('');
   }, [selectedBlock]);
 
+  type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
+
   const createMutation = useMutation({
     mutationFn: (content: string) => {
       if (!selectedBlock) throw new Error('No block selected');
       return api.createComment(selectedBlock.hash, content, undefined, selectedBlock.text);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] });
+    onSuccess: ({ comment }) => {
+      // 直接写入缓存，新评论立即可见（不等 network round trip）
+      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
+        if (!old) return old;
+        const newCount = { ...old.blockCommentCount, [comment.block_hash]: (old.blockCommentCount[comment.block_hash] ?? 0) + 1 };
+        return { comments: [...old.comments, comment], blockCommentCount: newCount };
+      });
       setNewComment('');
-      // 不清除 selectedBlock，保持抽屉继续显示该 block 的评论
+      // 清除 focusCommentIds，切换到 selectedBlock 模式，此时新评论已在缓存里
+      onClearFocus?.();
     },
   });
-
-  type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
 
   const likeMutation = useMutation({
     mutationFn: (commentId: string) => api.likeComment(commentId),
