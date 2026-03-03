@@ -171,6 +171,7 @@ router.get('/:id/comments', async (req, res) => {
     const lineHashes = Array.from(lineHashToBlockHash.keys());
 
     // 获取这些块的所有评论，同时匹配 sentence_hash（跨文档共享评论）
+    // 热度排序公式：(3×reply_count + like_count) × e^(-0.05×小时数) + 冷启动加成(2小时内+1.5)
     const { userId } = await getCallerInfo(req);
     const commentsResult = await pool.query(
       `SELECT c.*, u.username, u.avatar_url,
@@ -182,7 +183,11 @@ router.get('/:id/comments', async (req, res) => {
        LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $3
        WHERE (c.block_hash = ANY($1) OR (c.sentence_hash IS NOT NULL AND c.sentence_hash = ANY($2)))
          AND c.root_id IS NULL AND c.is_deleted = false
-       ORDER BY c.created_at ASC`,
+       ORDER BY (
+         (3.0 * COALESCE(c.reply_count, 0) + 1.0 * COALESCE(c.like_count, 0))
+         * EXP(-0.05 * EXTRACT(EPOCH FROM (NOW() - c.created_at)) / 3600.0)
+         + CASE WHEN c.created_at > NOW() - INTERVAL '2 hours' THEN 1.5 ELSE 0.0 END
+       ) DESC, c.created_at ASC`,
       [blockHashes, lineHashes, userId]
     );
 

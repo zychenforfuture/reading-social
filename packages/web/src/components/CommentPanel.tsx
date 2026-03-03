@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Comment, cn, timeAgo } from '../lib/utils';
 import { useUserStore } from '../stores/userStore';
-import { X, ThumbsUp, MessageSquare, Send, ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react';
+import { X, ThumbsUp, MessageSquare, Send, ChevronDown, ChevronUp, CornerDownRight, Flame, Clock } from 'lucide-react';
 
 interface CommentPanelProps {
   documentId: string;
@@ -301,6 +301,7 @@ export default function CommentPanel({
   const queryClient = useQueryClient();
   const { user } = useUserStore();
   const [newComment, setNewComment] = useState('');
+  const [sortMode, setSortMode] = useState<'hot' | 'newest'>('hot');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -421,12 +422,31 @@ export default function CommentPanel({
                   : `${comments.length} 条`}
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-muted transition-colors"
-          >
-            <X className="h-4 w-4 text-muted-foreground" />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* 排序切换：最热 / 最新 */}
+            <div className="flex items-center rounded-md border text-xs overflow-hidden mr-1">
+              <button
+                onClick={() => setSortMode('hot')}
+                className={cn('flex items-center gap-0.5 px-2 py-1 transition-colors', sortMode === 'hot' ? 'bg-orange-500 text-white' : 'text-muted-foreground hover:bg-muted')}
+              >
+                <Flame className="h-3 w-3" />
+                最热
+              </button>
+              <button
+                onClick={() => setSortMode('newest')}
+                className={cn('flex items-center gap-0.5 px-2 py-1 transition-colors', sortMode === 'newest' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}
+              >
+                <Clock className="h-3 w-3" />
+                最新
+              </button>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-muted transition-colors"
+            >
+              <X className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </div>
         </div>
 
         {/* 评论列表 */}
@@ -437,11 +457,15 @@ export default function CommentPanel({
             // 2. 选中文字发评论：只显示该 block 的评论
             // 3. 无 focus：显示全部
             const focusSet = focusCommentIds ? new Set(focusCommentIds) : null;
-            const displayComments = focusSet
+            const baseComments = focusSet
               ? comments.filter(c => focusSet.has(c.id))
               : selectedBlock
                 ? comments.filter(c => matchesSelection(c, selectedBlock))
                 : comments;
+            // 最热：保持 API 返回的热度排序；最新：按发表时间倒序
+            const displayComments = sortMode === 'newest'
+              ? [...baseComments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+              : baseComments;
 
             const isFocused = !!focusCommentIds || !!selectedBlock;
 
