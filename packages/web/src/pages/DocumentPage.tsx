@@ -125,12 +125,48 @@ function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock }:
   // 所有 hooks 已声明，现在才可以条件返回
   if (chapterComments.length === 0) return null;
 
-  // 按 block 顺序分组
-  const groups: { block: ContentBlock; comments: Comment[] }[] = [];
-  for (const block of chapterBlocks) {
-    const bc = chapterComments.filter(c => c.block_hash === block.block_hash);
-    if (bc.length > 0) groups.push({ block, comments: bc });
+  // 按「被评论的句子」一级分组，打平 block 层级
+  // key: selected_text（有则用）；无 selected_text 时 fallback 到 block 首行
+  const blockMap = new Map(chapterBlocks.map(b => [b.block_hash, b]));
+  const blockOrder = new Map(chapterBlocks.map((b, i) => [b.block_hash, i]));
+
+  type SentenceGroup = {
+    mapKey: string;       // Map 去重 key（selected_text 或 '__block__'+hash）
+    sentence: string;     // 展示用文字
+    isFullBlock: boolean; // 无 selected_text 时为 true
+    block: ContentBlock;
+    comments: Comment[];
+  };
+
+  const sentenceMap = new Map<string, SentenceGroup>();
+  for (const c of chapterComments) {
+    const block = blockMap.get(c.block_hash)!;
+    const st = c.selected_text?.trim() ?? '';
+    const mapKey = st || `__block__${c.block_hash}`;
+    if (!sentenceMap.has(mapKey)) {
+      sentenceMap.set(mapKey, {
+        mapKey,
+        sentence: st || (block.raw_content.split('\n')[0]?.trim().slice(0, 80) ?? ''),
+        isFullBlock: !st,
+        block,
+        comments: [],
+      });
+    }
+    sentenceMap.get(mapKey)!.comments.push(c);
   }
+
+  // 按 block 顺序排序，同一 block 内先句子评论后整段评论
+  const sentenceGroups = Array.from(sentenceMap.values()).sort((a, b) => {
+    const oi = blockOrder.get(a.block.block_hash) ?? 0;
+    const oj = blockOrder.get(b.block.block_hash) ?? 0;
+    if (oi !== oj) return oi - oj;
+    if (a.isFullBlock !== b.isFullBlock) return a.isFullBlock ? 1 : -1;
+    // 同一 block 内按句子在原文的出现位置排序
+    const text = a.block.raw_content;
+    const pa = text.indexOf(a.sentence.substring(0, 10));
+    const pb = text.indexOf(b.sentence.substring(0, 10));
+    return pa - pb;
+  });
 
   return (
     <div className="mt-6 border rounded-lg bg-card">
@@ -142,83 +178,61 @@ function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock }:
         </span>
       </div>
       <div className="divide-y">
-        {groups.map(({ block, comments: gc }) => {
-          const excerpt = block.raw_content.split('\n')[0]?.trim().slice(0, 80) ?? '';
-
-          // 按 selected_text 二级分组
-          const textGroupMap = new Map<string, Comment[]>();
-          for (const c of gc) {
-            const key = c.selected_text?.trim() ?? '';
-            const arr = textGroupMap.get(key);
-            if (arr) arr.push(c);
-            else textGroupMap.set(key, [c]);
-          }
-
-          return (
-            <div
-              key={block.block_hash}
-              className="px-4 py-3"
+        {sentenceGroups.map(({ mapKey, sentence, isFullBlock, block, comments: gc }) => (
+          <div key={mapKey} className="px-4 py-4">
+            {/* 被评论句子引用 */}
+            <button
+              onClick={() => onSelectBlock(block.block_hash, isFullBlock ? '' : sentence)}
+              className={[
+                'w-full text-left mb-3 pl-3 border-l-2 text-xs transition-colors line-clamp-2',
+                isFullBlock
+                  ? 'border-gray-300 text-muted-foreground/70 hover:text-foreground italic'
+                  : 'border-orange-400 text-gray-700 hover:text-foreground',
+              ].join(' ')}
             >
-              {/* 段落摘要（可点击） */}
-              <button
-                onClick={() => onSelectBlock(block.block_hash, excerpt)}
-                className="w-full text-left mb-3 pl-2 border-l-2 border-orange-300 text-xs text-muted-foreground hover:text-foreground transition-colors line-clamp-1"
-              >
-                {excerpt}{block.raw_content.trim().length > 80 && '…'}
-              </button>
+              {sentence}{isFullBlock && sentence.length >= 80 && '…'}
+            </button>
 
-              {/* 按引用文字分组 */}
-              <div className="space-y-4">
-                {Array.from(textGroupMap.entries()).map(([key, groupComments]) => (
-                  <div key={key || '__no_text__'}>
-                    {key && (
-                      <div className="mb-2 pl-2 border-l-2 border-orange-200 text-xs text-muted-foreground/80 italic line-clamp-2">
-                        {key}
+            {/* 该句子下的评论列表 */}
+            <div className="space-y-3">
+              {gc.map(c => (
+                <div key={c.id} className="group">
+                  <div className="flex gap-2.5">
+                    <Avatar name={c.username || '匿名'} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className="text-sm font-medium truncate">{c.username || '匿名用户'}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">{timeAgo(c.created_at)}</span>
                       </div>
-                    )}
-                    <div className="space-y-3">
-                      {groupComments.map(c => (
-                        <div key={c.id} className="group">
-                          <div className="flex gap-2.5">
-                            <Avatar name={c.username || '匿名'} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-baseline gap-2 mb-0.5">
-                                <span className="text-sm font-medium truncate">{c.username || '匿名用户'}</span>
-                                <span className="text-xs text-muted-foreground shrink-0">{timeAgo(c.created_at)}</span>
-                              </div>
-                              <p className="text-sm text-foreground leading-relaxed break-words">{c.content}</p>
-                              <div className="flex items-center gap-3 mt-2">
-                                <button
-                                  onClick={() => likeMutation.mutate(c.id)}
-                                  className={cn(
-                                    'flex items-center gap-1 text-xs transition-colors',
-                                    c.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
-                                  )}
-                                >
-                                  <ThumbsUp className={cn('h-3 w-3', c.liked_by_me && 'fill-current')} />
-                                  {c.like_count > 0 && <span>{c.like_count}</span>}
-                                </button>
-                                {(user?.is_admin || c.user_id === user?.id) && (
-                                  <button
-                                    onClick={() => deleteMutation.mutate(c.id)}
-                                    className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                                  >
-                                    删除
-                                  </button>
-                                )}
-                              </div>
-                              <ReplySection comment={c} documentId={documentId} currentUser={user} />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                      <p className="text-sm text-foreground leading-relaxed break-words">{c.content}</p>
+                      <div className="flex items-center gap-3 mt-2">
+                        <button
+                          onClick={() => likeMutation.mutate(c.id)}
+                          className={cn(
+                            'flex items-center gap-1 text-xs transition-colors',
+                            c.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          <ThumbsUp className={cn('h-3 w-3', c.liked_by_me && 'fill-current')} />
+                          {c.like_count > 0 && <span>{c.like_count}</span>}
+                        </button>
+                        {(user?.is_admin || c.user_id === user?.id) && (
+                          <button
+                            onClick={() => deleteMutation.mutate(c.id)}
+                            className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            删除
+                          </button>
+                        )}
+                      </div>
+                      <ReplySection comment={c} documentId={documentId} currentUser={user} />
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </div>
   );
