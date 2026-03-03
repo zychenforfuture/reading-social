@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { documentQueue } from '../config/queue.js';
@@ -128,19 +129,36 @@ router.get('/:id/comments', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 获取文档的所有块
+    // 获取文档所有块（含原文，用于跨文档句子匹配）
     const blocksResult = await pool.query(
-      'SELECT block_hash FROM document_blocks WHERE document_id = $1',
+      `SELECT db.block_hash, cb.raw_content
+       FROM document_blocks db
+       JOIN content_blocks cb ON db.block_hash = cb.block_hash
+       WHERE db.document_id = $1`,
       [id]
     );
 
-    const blockHashes = blocksResult.rows.map(r => r.block_hash);
-
-    if (blockHashes.length === 0) {
+    if (blocksResult.rows.length === 0) {
       return res.json({ comments: [], blockCommentCount: {} });
     }
 
-    // 获取这些块的所有评论（含 like_count、liked_by_me）—— 只拉根评论
+    const blockHashes: string[] = blocksResult.rows.map((r: { block_hash: string }) => r.block_hash);
+    const blockHashSet = new Set(blockHashes);
+
+    // 为每一行内容建立 sentence_hash → 本文档对应 block_hash 的映射
+    // 用于把「来自其他文档 block」的评论重映射到本文档的正确块
+    const lineHashToBlockHash = new Map<string, string>();
+    for (const row of blocksResult.rows) {
+      for (const rawLine of (row.raw_content as string).split('\n')) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const h = createHash('md5').update(line).digest('hex');
+        if (!lineHashToBlockHash.has(h)) lineHashToBlockHash.set(h, row.block_hash);
+      }
+    }
+    const lineHashes = Array.from(lineHashToBlockHash.keys());
+
+    // 获取这些块的所有评论，同时匹配 sentence_hash（跨文档共享评论）
     const { userId } = await getCallerInfo(req);
     const commentsResult = await pool.query(
       `SELECT c.*, u.username, u.avatar_url,
@@ -149,20 +167,30 @@ router.get('/:id/comments', async (req, res) => {
               CASE WHEN cl.user_id IS NOT NULL THEN true ELSE false END as liked_by_me
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
-       LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $2
-       WHERE c.block_hash = ANY($1) AND c.root_id IS NULL AND c.is_deleted = false
+       LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $3
+       WHERE (c.block_hash = ANY($1) OR (c.sentence_hash IS NOT NULL AND c.sentence_hash = ANY($2)))
+         AND c.root_id IS NULL AND c.is_deleted = false
        ORDER BY c.created_at ASC`,
-      [blockHashes, userId]
+      [blockHashes, lineHashes, userId]
     );
 
-    // 统计每个块的评论数
+    // 跨文档评论：block_hash 不属于本文档 → 用 sentence_hash 重映射到本文档的块
+    const remappedComments = commentsResult.rows.map((c: Record<string, unknown>) => {
+      if (!blockHashSet.has(c.block_hash as string) && c.sentence_hash) {
+        const localHash = lineHashToBlockHash.get(c.sentence_hash as string);
+        if (localHash) return { ...c, block_hash: localHash };
+      }
+      return c;
+    });
+
+    // 统计每个块的评论数（用重映射后的 block_hash）
     const blockCommentCount: Record<string, number> = {};
     for (const hash of blockHashes) {
-      blockCommentCount[hash] = commentsResult.rows.filter(c => c.block_hash === hash).length;
+      blockCommentCount[hash] = remappedComments.filter((c: Record<string, unknown>) => c.block_hash === hash).length;
     }
 
     res.json({
-      comments: commentsResult.rows,
+      comments: remappedComments,
       blockCommentCount,
     });
   } catch (error) {

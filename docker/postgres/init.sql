@@ -65,7 +65,13 @@ CREATE TABLE IF NOT EXISTS comments (
     block_hash VARCHAR(64) REFERENCES content_blocks(block_hash) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     parent_comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,  -- 支持回复
+    root_id UUID REFERENCES comments(id) ON DELETE CASCADE,            -- 二级回复根评论
+    reply_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     content TEXT NOT NULL,
+    selected_text VARCHAR(500),        -- 用户选中的原文片段
+    sentence_hash VARCHAR(64),         -- MD5(selected_text) 用于跨文档评论共享
+    like_count INTEGER NOT NULL DEFAULT 0,
+    reply_count INTEGER NOT NULL DEFAULT 0,
     is_resolved BOOLEAN DEFAULT FALSE,
     is_deleted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -74,6 +80,8 @@ CREATE TABLE IF NOT EXISTS comments (
 CREATE INDEX idx_comments_by_hash ON comments(block_hash);
 CREATE INDEX idx_comments_by_user ON comments(user_id);
 CREATE INDEX idx_comments_parent ON comments(parent_comment_id);
+CREATE INDEX idx_comments_root_id ON comments(root_id);
+CREATE INDEX idx_comments_sentence_hash ON comments(sentence_hash);
 
 -- 相似块表 (模糊匹配)
 CREATE TABLE IF NOT EXISTS similar_blocks (

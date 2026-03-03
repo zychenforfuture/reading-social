@@ -1,7 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
+
+/** MD5 of a trimmed sentence — used for cross-document comment sharing */
+function sentenceHash(text: string): string {
+  return createHash('md5').update(text.trim()).digest('hex');
+}
 
 const router: Router = Router();
 
@@ -30,6 +36,15 @@ const router: Router = Router();
         WHERE r.root_id = c.id AND r.is_deleted = false
       )
       WHERE c.root_id IS NULL
+    `);
+    // selected_text + sentence_hash（跨文档评论共享）
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)`);
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS sentence_hash VARCHAR(64)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_sentence_hash ON comments(sentence_hash)`);
+    // 回填已有评论的 sentence_hash（PostgreSQL 内置 md5()）
+    await pool.query(`
+      UPDATE comments SET sentence_hash = md5(trim(selected_text))
+      WHERE selected_text IS NOT NULL AND sentence_hash IS NULL
     `);
     logger.info('comment_likes migration OK');
   } catch (err) {
@@ -182,9 +197,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     const userId = await getUserId(req);
 
-    // 确保列存在（兼容旧数据库）
-    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)`).catch(() => {});
-
     if (rootId) {
       // ───── 回复模式 ─────
       const client = await pool.connect();
@@ -250,11 +262,12 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'blockHash is required for root comments' });
     }
 
+    const sHash = selectedText ? sentenceHash(selectedText) : null;
     const result = await pool.query(
-      `INSERT INTO comments (block_hash, user_id, content, selected_text)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, block_hash, user_id, content, selected_text, reply_count, created_at`,
-      [blockHash, userId, content, selectedText || null]
+      `INSERT INTO comments (block_hash, user_id, content, selected_text, sentence_hash)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, block_hash, user_id, content, selected_text, sentence_hash, reply_count, created_at`,
+      [blockHash, userId, content, selectedText || null, sHash]
     );
 
     const comment = result.rows[0];
