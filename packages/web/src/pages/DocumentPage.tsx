@@ -518,9 +518,9 @@ export default function DocumentPage() {
           setFocusCommentIds(null);
           setShowComments(true);
         }}
-        onClickCommentBubble={(ids) => {
+        onClickCommentBubble={(ids, block) => {
           setFocusCommentIds(ids);
-          setSelectedBlock(null);
+          setSelectedBlock({ hash: block.hash, text: block.text });
           setShowComments(true);
         }}
       />

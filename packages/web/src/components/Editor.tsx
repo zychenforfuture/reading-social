@@ -7,7 +7,7 @@ interface EditorProps {
   blockCommentCount: Record<string, number>;
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
-  onClickCommentBubble: (commentIds: string[]) => void;
+  onClickCommentBubble: (commentIds: string[], block: { hash: string; text: string }) => void;
 }
 
 interface Tooltip {
@@ -125,7 +125,7 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
                   {lineCommentIds[0]?.length > 0 && (
                     <button
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[0]); }}
+                      onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[0], { hash: block.block_hash, text: firstLine }); }}
                       className="inline-flex items-center justify-center ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none align-middle transition-colors cursor-pointer select-none"
                     >
                       {lineCommentIds[0].length}
@@ -172,7 +172,7 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
                     {lineCommentIds[lineIdx].length > 0 && (
                       <button
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[lineIdx]); }}
+                        onClick={(e) => { e.stopPropagation(); onClickCommentBubble(lineCommentIds[lineIdx], { hash: block.block_hash, text: trimmed }); }}
                         className="inline-flex items-center justify-center ml-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none align-middle transition-colors cursor-pointer select-none"
                         style={{ verticalAlign: 'middle' }}
                       >
