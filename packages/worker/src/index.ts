@@ -33,9 +33,8 @@ const fingerprintWorker = new Worker(
     const content: string = docRow.rows[0].content;
 
     try {
-      // 将原文按行切分后合并成 ≥300 字的段落块（兼顾章节边界）
-      const rawLines = content.split(/\r?\n/);
-      const blocks = groupBlocks(rawLines);
+      // 按自然段（单行换行）切分，去除 \r 和空行
+      const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
 
       logger.info(`Document ${documentId}: found ${blocks.length} blocks`);
 
@@ -118,33 +117,6 @@ fingerprintWorker.on('completed', (job) => {
 fingerprintWorker.on('failed', (job, err) => {
   logger.error(`Job ${job?.id} failed: ${err?.message ?? String(err)}`);
 });
-
-// 章节标题正则
-const CHAPTER_RE_W = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|序章|终章|后记|前言|楔子|尾声)/i;
-
-// 将行列表合并成较大的块（目标 ≥300 字符），章节标题单独成块
-function groupBlocks(lines: string[], targetSize = 300): string[] {
-  const result: string[] = [];
-  let current: string[] = [];
-  let currentLen = 0;
-  const flush = () => {
-    if (current.length > 0) {
-      result.push(current.join('\n'));
-      current = [];
-      currentLen = 0;
-    }
-  };
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) { flush(); continue; }
-    if (CHAPTER_RE_W.test(line)) { flush(); result.push(line); continue; }
-    current.push(line);
-    currentLen += line.length;
-    if (currentLen >= targetSize) flush();
-  }
-  flush();
-  return result;
-}
 
 // 计算 SimHash (简化版本)
 function computeSimHash(text: string): string {
