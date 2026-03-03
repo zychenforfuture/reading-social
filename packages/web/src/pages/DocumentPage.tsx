@@ -431,7 +431,7 @@ export default function DocumentPage() {
   }
 
   return (
-    <div className="space-y-4 pb-20">
+    <div className="space-y-4 pb-6">
       {/* 后台继续加载，不显示进度提示 */}
       {/* 标题行 */}
       <div className="flex items-center justify-between">
@@ -461,7 +461,38 @@ export default function DocumentPage() {
         </div>
       </div>
 
-      {/* 章节导航栏 - 已移至底部 fixed */}
+      {/* 章节导航栏 */}
+      {chapters.length > 1 && (
+        <div className="sticky top-14 z-20 flex items-center justify-between border rounded-lg px-4 py-2 bg-background/95 backdrop-blur shadow-sm text-sm">
+          <button
+            onClick={() => goTo(currentChapter - 1)}
+            disabled={currentChapter === 0}
+            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            上一章
+          </button>
+
+          <button
+            onClick={() => setShowTOC(true)}
+            className="flex-1 text-center font-medium text-foreground px-4 hover:text-primary transition-colors truncate"
+          >
+            {chapter?.title ?? ''}
+            <span className="text-xs text-muted-foreground font-normal ml-2">
+              {currentChapter + 1} / {loadingBlocks ? '…' : chapters.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => goTo(currentChapter + 1)}
+            disabled={currentChapter === chapters.length - 1}
+            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+          >
+            下一章
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* 正文 */}
       <Editor
@@ -544,43 +575,6 @@ export default function DocumentPage() {
           onSelect={goTo}
           onClose={() => setShowTOC(false)}
         />
-      )}
-
-      {/* 章节导航栏（固定在底部） */}
-      {chapters.length > 1 && (
-        <div className="fixed bottom-0 left-0 right-0 z-30">
-          <div className="container py-2">
-            <div className="flex items-center justify-between border rounded-lg px-4 py-2 bg-background/95 backdrop-blur shadow-[0_-2px_8px_rgba(0,0,0,0.08)] text-sm">
-              <button
-                onClick={() => goTo(currentChapter - 1)}
-                disabled={currentChapter === 0}
-                className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                上一章
-              </button>
-
-              <button
-                onClick={() => setShowTOC(true)}
-                className="flex-1 text-center font-medium text-foreground px-4 hover:text-primary transition-colors truncate"
-              >
-                {chapter?.title ?? ''}
-                <span className="text-xs text-muted-foreground font-normal ml-2">
-                  {currentChapter + 1} / {loadingBlocks ? '…' : chapters.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => goTo(currentChapter + 1)}
-                disabled={currentChapter === chapters.length - 1}
-                className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
-              >
-                下一章
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
