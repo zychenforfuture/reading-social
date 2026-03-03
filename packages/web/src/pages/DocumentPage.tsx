@@ -501,6 +501,7 @@ export default function DocumentPage() {
           documentId={id!}
           blocks={allBlocks}
           blockCommentCount={blockCommentCount}
+          comments={allComments}
           onSelectBlock={(hash, text) => {
             setSelectedBlock({ hash, text });
             setFocusCommentIds(null);

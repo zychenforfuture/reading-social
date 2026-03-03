@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { ContentBlock } from '../lib/utils';
+import { MessageSquare } from 'lucide-react';
+import type { ContentBlock, Comment } from '../lib/utils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -11,6 +12,7 @@ interface PdfViewerProps {
   documentId: string;
   blocks: ContentBlock[];
   blockCommentCount: Record<string, number>;
+  comments: Comment[];
   onSelectBlock: (hash: string, text: string) => void;
   onClickCommentBubble: (ids: string[]) => void;
 }
@@ -19,7 +21,9 @@ export default function PdfViewer({
   documentId,
   blocks,
   blockCommentCount,
+  comments,
   onSelectBlock,
+  onClickCommentBubble,
 }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -27,10 +31,17 @@ export default function PdfViewer({
   const [renderedPages, setRenderedPages] = useState<Set<number>>(new Set());
   // 每页 CSS 显示尺寸，渲染后用于固定容器宽高
   const [pageSizes, setPageSizes] = useState<Map<number, { w: number; h: number }>>(new Map());
+  // 每页的气泡位置：{ top: CSS坐标, hash, count }
+  const [pageBubbles, setPageBubbles] = useState<Map<number, Array<{ top: number; hash: string; count: number }>>>(new Map());
 
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   // 每页的 container div ref
   const pageContainerRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  // 稳定 ref，供 useCallback 内正确读取最新值而不创建新引用
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+  const blockCommentCountRef = useRef(blockCommentCount);
+  blockCommentCountRef.current = blockCommentCount;
 
   const pdfUrl = `/api/documents/${documentId}/pdf`;
 
@@ -42,6 +53,7 @@ export default function PdfViewer({
     setNumPages(0);
     setRenderedPages(new Set());
     setPageSizes(new Map());
+    setPageBubbles(new Map());
 
     pdfjsLib.getDocument({ url: pdfUrl, cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`, cMapPacked: true })
       .promise
@@ -61,7 +73,41 @@ export default function PdfViewer({
     return () => { cancelled = true; };
   }, [pdfUrl]);
 
-  // 渲染单页（canvas + text layer）
+  // 从已渲染的 DOM 中重新计算气泡（不重绘 canvas）
+  const computePageBubbles = useCallback((pageNum: number) => {
+    const container = pageContainerRefs.current.get(pageNum);
+    if (!container) return;
+    const textLayerDiv = container.querySelector('.pdf-text-layer') as HTMLDivElement | null;
+    if (!textLayerDiv) return;
+    const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+    const allSpans = Array.from(textLayerDiv.querySelectorAll('span')) as HTMLSpanElement[];
+    const bubbles: Array<{ top: number; hash: string; count: number }> = [];
+    for (const block of blocksRef.current) {
+      const count = blockCommentCountRef.current[block.block_hash] ?? 0;
+      if (count === 0) continue;
+      const blockNorm = norm(block.raw_content);
+      if (!blockNorm) continue;
+      let lastBottom = -1;
+      for (const sp of allSpans) {
+        const spText = norm(sp.textContent ?? '');
+        if (spText.length < 2) continue;
+        if (blockNorm.includes(spText)) {
+          const t = parseFloat(sp.style.top || '0');
+          const fh = parseFloat(sp.style.fontSize || '12');
+          const bottom = t + fh;
+          if (!isNaN(bottom) && bottom > lastBottom) lastBottom = bottom;
+        }
+      }
+      if (lastBottom >= 0) bubbles.push({ top: lastBottom, hash: block.block_hash, count });
+    }
+    setPageBubbles((prev) => {
+      const next = new Map(prev);
+      next.set(pageNum, bubbles);
+      return next;
+    });
+  }, []);
+
+  // 渲染单页（canvas + text layer）——不依赖 blocks/blockCommentCount 避免重绘
   const renderPage = useCallback(async (pageNum: number) => {
     if (!pdfDocRef.current) return;
     const container = pageContainerRefs.current.get(pageNum);
@@ -133,18 +179,44 @@ export default function PdfViewer({
           .join(';');
         textLayerDiv.appendChild(span);
       }
-    }
 
-    // 记录 CSS 显示尺寸，供容器占位
+      // 计算本页有评论的 block 的气泡位置（取 block 文本最后匹配 span 的底部 Y）
+      const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+      const bubbles: Array<{ top: number; hash: string; count: number }> = [];
+      const allSpans = Array.from(textLayerDiv.querySelectorAll('span')) as HTMLSpanElement[];
+      for (const block of blocks) {
+        const count = blockCommentCount[block.block_hash] ?? 0;
+        if (count === 0) continue;
+        const blockNorm = norm(block.raw_content);
+        if (!blockNorm) continue;
+        let lastBottom = -1;
+        for (const sp of allSpans) {
+          const spText = norm(sp.textContent ?? '');
+          if (spText.length < 2) continue;
+          if (blockNorm.includes(spText)) {
+            const t = parseFloat(sp.style.top || '0');
+            const fh = parseFloat(sp.style.fontSize || '12');
+            const bottom = t + fh;
+            if (!isNaN(bottom) && bottom > lastBottom) lastBottom = bottom;
+          }
+        }
+        if (lastBottom >= 0) bubbles.push({ top: lastBottom, hash: block.block_hash, count });
+      }
+      setPageBubbles((prev) => {
+        const next = new Map(prev);
+        next.set(pageNum, bubbles);
+        return next;
+      });
+    }
     setPageSizes((prev) => {
       const next = new Map(prev);
       next.set(pageNum, { w: displayViewport.width, h: displayViewport.height });
       return next;
     });
     setRenderedPages((prev) => new Set(prev).add(pageNum));
-  }, []);
+  }, [computePageBubbles]);
 
-  // 页面 DOM 就绪后渲染
+  // renderPage 稳定（依赖 computePageBubbles），每次 numPages 就绪时渲染
   useEffect(() => {
     if (numPages === 0) return;
     const timer = setTimeout(() => {
@@ -178,7 +250,12 @@ export default function PdfViewer({
     }
   }, [blocks, onSelectBlock]);
 
-  // 总评论数（标题区用）
+  // blockCommentCount 变化时只重算气泡，不重绘 canvas
+  useEffect(() => {
+    if (renderedPages.size === 0) return;
+    for (const pageNum of renderedPages) computePageBubbles(pageNum);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockCommentCount, computePageBubbles]);
   const totalComments = Object.values(blockCommentCount).reduce((a, b) => a + b, 0);
 
   if (isLoading) {
@@ -239,6 +316,24 @@ export default function PdfViewer({
                   transformOrigin: '0 0',
                 }}
               />
+
+              {/* 评论气泡：绝对定位于段落末尾右侧 */}
+              {(pageBubbles.get(pageNum) ?? []).map(({ top, hash, count }) => {
+                const blockComments = comments.filter((c) => c.block_hash === hash);
+                const ids = blockComments.map((c) => c.id);
+                return (
+                  <button
+                    key={hash}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => { e.stopPropagation(); onClickCommentBubble(ids); }}
+                    style={{ position: 'absolute', top: top - 10, right: 6, zIndex: 10 }}
+                    className="inline-flex items-center justify-center gap-0.5 min-w-[20px] h-5 px-1.5 rounded-full bg-orange-400 hover:bg-orange-500 text-white text-[11px] font-bold leading-none shadow transition-colors cursor-pointer select-none"
+                  >
+                    <MessageSquare className="h-2.5 w-2.5" />
+                    {count}
+                  </button>
+                );
+              })}
 
               {/* 页码徽章 */}
               {renderedPages.has(pageNum) && (
