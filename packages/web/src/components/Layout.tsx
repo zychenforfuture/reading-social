@@ -32,7 +32,23 @@ export default function Layout() {
           <div className="flex flex-1 items-center justify-end space-x-2">
             {isAuthenticated ? (
               <>
-                <span className="text-sm text-muted-foreground mr-4">{user?.username}</span>
+                <Link
+                  to="/profile"
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mr-2"
+                >
+                  {user?.avatar_url ? (
+                    <img
+                      src={user.avatar_url}
+                      alt={user.username}
+                      className="w-7 h-7 rounded-full object-cover border border-gray-200"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-teal-500 text-white flex items-center justify-center text-xs font-bold">
+                      {(user?.username || '?')[0].toUpperCase()}
+                    </div>
+                  )}
+                  <span>{user?.username}</span>
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-muted h-9 px-4 py-2"

@@ -28,6 +28,8 @@ export const api: {
   likeComment: (id: string) => Promise<{ liked: boolean; likeCount: number }>;
   getBlock: (hash: string) => Promise<{ block?: ContentBlock; documents?: Document[] }>;
   getBlockSimilar: (hash: string) => Promise<{ similar?: SimilarBlock[] }>;
+  updateProfile: (avatarUrl: string) => Promise<{ user: User }>;
+  changePassword: (oldPassword: string, newPassword: string) => Promise<{ message: string }>;
 } = {
   // @ts-ignore - Vite 环境变量
   baseURL: import.meta.env?.VITE_API_URL || '/api',
@@ -129,6 +131,12 @@ export const api: {
   getBlock: (hash: string) => api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),
   getBlockSimilar: (hash: string) =>
     api.request<{ similar?: SimilarBlock[] }>(`/blocks/${hash}/similar`),
+
+  // Profile
+  updateProfile: (avatarUrl: string) =>
+    api.request<{ user: User }>('/auth/profile', { method: 'PUT', body: JSON.stringify({ avatar_url: avatarUrl }) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    api.request<{ message: string }>('/auth/change-password', { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) }),
 };
 
 export type User = {
