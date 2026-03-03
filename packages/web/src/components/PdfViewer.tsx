@@ -89,24 +89,49 @@ export default function PdfViewer({
     const ctx = canvas.getContext('2d')!;
     await page.render({ canvasContext: ctx, viewport: hiDpiViewport }).promise;
 
-    // text layer 使用 displayViewport，坐标与 canvas CSS 尺寸完全对齐
+    // 手动构建 text layer：不依赖 renderTextLayer API，兼容 pdfjs 3.x / 4.x
     if (textLayerDiv) {
       textLayerDiv.innerHTML = '';
       textLayerDiv.style.width = `${displayViewport.width}px`;
       textLayerDiv.style.height = `${displayViewport.height}px`;
+
       const textContent = await page.getTextContent();
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pdfjs = pdfjsLib as any;
-        // 关键：传 displayViewport（非 hiDpiViewport），span 坐标才与 canvas 对齐
-        const task = pdfjs.renderTextLayer({
-          textContentSource: textContent,
-          container: textLayerDiv,
-          viewport: displayViewport,
-        });
-        await (task as { promise: Promise<void> }).promise;
-      } catch {
-        // text layer 失败时静默降级
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const util = (pdfjsLib as any).Util;
+
+      for (const item of textContent.items as Array<Record<string, unknown>>) {
+        const str = item.str as string | undefined;
+        if (!str) continue;
+
+        // 用 viewport.transform 将 PDF 坐标转为 CSS 坐标
+        const tx: number[] = util
+          ? util.transform(displayViewport.transform, item.transform as number[])
+          : (displayViewport as unknown as { transform: (t: number[]) => number[] }).transform(
+              item.transform as number[],
+            );
+
+        const angle = Math.atan2(tx[1], tx[0]);
+        const fontHeight = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+        const left = tx[4];
+        const top = tx[5] - fontHeight;
+
+        const span = document.createElement('span');
+        span.textContent = str;
+        span.style.cssText = [
+          'position:absolute',
+          `left:${left}px`,
+          `top:${top}px`,
+          `font-size:${fontHeight}px`,
+          'font-family:sans-serif',
+          'color:transparent',
+          'white-space:pre',
+          'cursor:text',
+          'transform-origin:0% 0%',
+          angle !== 0 ? `transform:rotate(${angle}rad)` : '',
+        ]
+          .filter(Boolean)
+          .join(';');
+        textLayerDiv.appendChild(span);
       }
     }
 
