@@ -462,8 +462,8 @@ export default function DocumentPage() {
         </div>
       </div>
 
-      {/* 章节导航栏 */}
-      {chapters.length > 1 && (
+      {/* 章节导航栏（PDF 不需要） */}
+      {chapters.length > 1 && data.document.source_type !== 'pdf' && (
         <div className="sticky top-14 z-20 flex items-center justify-between border rounded-lg px-4 py-2 bg-background/95 backdrop-blur shadow-sm text-sm">
           <button
             onClick={() => goTo(currentChapter - 1)}
@@ -499,7 +499,7 @@ export default function DocumentPage() {
       {data.document.source_type === 'pdf' ? (
         <PdfViewer
           documentId={id!}
-          blocks={chapterBlocks}
+          blocks={allBlocks}
           blockCommentCount={blockCommentCount}
           onSelectBlock={(hash, text) => {
             setSelectedBlock({ hash, text });
@@ -530,10 +530,10 @@ export default function DocumentPage() {
         />
       )}
 
-      {/* 评论抽屉：只显示当前章节的评论 */}
+      {/* 评论抽屉：PDF 显示全文评论，TXT 只显示当前章节 */}
       <CommentPanel
         documentId={id!}
-        comments={allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
+        comments={data.document.source_type === 'pdf' ? allComments : allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
         blockCommentCount={blockCommentCount}
         selectedBlock={selectedBlock}
         onClearSelection={() => setSelectedBlock(null)}
@@ -554,8 +554,8 @@ export default function DocumentPage() {
         }}
       />
 
-      {/* 底部翻章按钮 */}
-      {chapters.length > 1 && (
+      {/* 底部翻章按钮（PDF 不需要） */}
+      {chapters.length > 1 && data.document.source_type !== 'pdf' && (
         <div className="flex items-center justify-between pt-4 border-t">
           <button
             onClick={() => goTo(currentChapter - 1)}
