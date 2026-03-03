@@ -78,7 +78,7 @@ router.get('/:hash', async (req, res) => {
     const { hash } = req.params;
 
     const result = await pool.query(
-      `SELECT block_hash, raw_content, normalized_content, word_count,
+      `SELECT block_hash, raw_content, word_count,
               occurrence_count, created_at
        FROM content_blocks
        WHERE block_hash = $1`,

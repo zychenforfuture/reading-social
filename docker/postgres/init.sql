@@ -21,8 +21,9 @@ CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
-    content TEXT,                   -- 原始文本，用于重新分块
+    content TEXT,                   -- 原始文本，用于重新分块（处理完成后置 NULL）
     file_hash VARCHAR(64),          -- 整文件 MD5 (秒传用)
+    canonical_document_id UUID REFERENCES documents(id) ON DELETE CASCADE, -- 跨用户去重引用
     word_count INTEGER DEFAULT 0,
     block_count INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'processing',  -- processing, ready, error
@@ -32,12 +33,12 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX idx_documents_user_id ON documents(user_id);
 CREATE INDEX idx_documents_file_hash ON documents(file_hash);
 CREATE INDEX idx_documents_status ON documents(status);
+CREATE INDEX idx_documents_canonical ON documents(canonical_document_id);
 
 -- 内容块表 (核心表)
 CREATE TABLE IF NOT EXISTS content_blocks (
     block_hash VARCHAR(64) PRIMARY KEY,
     raw_content TEXT NOT NULL,
-    normalized_content TEXT,
     word_count INTEGER DEFAULT 0,
     occurrence_count INTEGER DEFAULT 1,  -- 在多少文档中出现
     similarity_hash VARCHAR(64),  -- SimHash 用于模糊匹配

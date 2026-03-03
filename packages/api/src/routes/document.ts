@@ -74,7 +74,8 @@ router.get('/:id', async (req, res) => {
     const limit  = Math.min(5000, Math.max(1, parseInt((req.query.limit  as string) || '2000', 10)));
 
     const docResult = await pool.query(
-      `SELECT id, title, word_count, block_count, status, created_at, updated_at
+      `SELECT id, title, word_count, block_count, status, created_at, updated_at,
+              COALESCE(canonical_document_id, id) AS effective_document_id
        FROM documents WHERE id = $1`,
       [id]
     );
@@ -84,6 +85,8 @@ router.get('/:id', async (req, res) => {
     }
 
     const doc = docResult.rows[0];
+    // 若是 canonical 引用，从原始文档读取 blocks
+    const effectiveId = doc.effective_document_id;
 
     // 直接 JOIN，避免把数十万个 hash 塞进 ANY($1)
     const blocksResult = await pool.query(
@@ -93,7 +96,7 @@ router.get('/:id', async (req, res) => {
        WHERE db.document_id = $1
        ORDER BY db.sequence_order
        LIMIT $2 OFFSET $3`,
-      [id, limit, offset]
+      [effectiveId, limit, offset]
     );
 
     res.json({
@@ -183,21 +186,47 @@ router.post('/', async (req: Request, res: Response) => {
     const crypto = await import('crypto');
     const fileHash = crypto.createHash('md5').update(content).digest('hex');
 
-    // 检查是否已存在相同文件（同一用户）
+    // 全局查找相同文件哈希（跨用户去重）
     const existing = await pool.query(
-      'SELECT id FROM documents WHERE file_hash = $1 AND user_id = $2',
-      [fileHash, userId]
+      `SELECT id, user_id, word_count, block_count, status, created_at
+       FROM documents
+       WHERE file_hash = $1 AND status = 'ready'
+       LIMIT 1`,
+      [fileHash]
     );
 
     if (existing.rows.length > 0) {
-      logger.info(`Document already exists: ${fileHash}`);
+      const canonical = existing.rows[0];
+      if (canonical.user_id === userId) {
+        // 同一用户重复上传
+        logger.info(`Document already exists for same user: ${fileHash}`);
+        return res.json({
+          document: canonical,
+          message: 'Document already processed (quick upload)',
+        });
+      }
+      // 不同用户上传同一文件 → 创建引用行，复用 blocks，无需重新处理
+      const refResult = await pool.query(
+        `INSERT INTO documents (user_id, title, file_hash, status, canonical_document_id, word_count, block_count)
+         VALUES ($1, $2, $3, 'ready', $4, $5, $6)
+         RETURNING id, created_at`,
+        [userId, title, fileHash, canonical.id, canonical.word_count, canonical.block_count]
+      );
+      logger.info(`Document deduped via canonical ${canonical.id}: ${refResult.rows[0].id}`);
       return res.json({
-        document: existing.rows[0],
-        message: 'Document already processed (quick upload)',
+        document: {
+          id: refResult.rows[0].id,
+          title,
+          word_count: canonical.word_count,
+          block_count: canonical.block_count,
+          status: 'ready',
+          created_at: refResult.rows[0].created_at,
+        },
+        message: 'Document instantly available (deduped)',
       });
     }
 
-    // 创建文档记录
+    // 创建新文档记录
     const docResult = await pool.query(
       'INSERT INTO documents (user_id, title, file_hash, status, content) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at',
       [userId, title, fileHash, 'processing', content]

@@ -33,8 +33,9 @@ const fingerprintWorker = new Worker(
     const content: string = docRow.rows[0].content;
 
     try {
-      // 按自然段（单行换行）切分，去除 \r 和空行
-      const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+      // 将原文按行切分后合并成 ≥300 字的段落块（兼顾章节边界）
+      const rawLines = content.split(/\r?\n/);
+      const blocks = groupBlocks(rawLines);
 
       logger.info(`Document ${documentId}: found ${blocks.length} blocks`);
 
@@ -59,14 +60,14 @@ const fingerprintWorker = new Worker(
       for (let start = 0; start < uniqueBlocks.length; start += BATCH) {
         const batch = uniqueBlocks.slice(start, start + BATCH);
         const placeholders = batch.map((_: unknown, j: number) => {
-          const b = j * 5;
-          return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5})`;
+          const b = j * 4;
+          return `($${b+1},$${b+2},$${b+3},$${b+4})`;
         }).join(',');
         const values = batch.flatMap((b) =>
-          [b.hash, b.content, b.content, b.content.length, b.simHash]
+          [b.hash, b.content, b.content.length, b.simHash]
         );
         await pool.query(
-          `INSERT INTO content_blocks (block_hash, raw_content, normalized_content, word_count, similarity_hash)
+          `INSERT INTO content_blocks (block_hash, raw_content, word_count, similarity_hash)
            VALUES ${placeholders}
            ON CONFLICT (block_hash) DO UPDATE SET occurrence_count = content_blocks.occurrence_count + 1, updated_at = NOW()`,
           values
@@ -90,9 +91,9 @@ const fingerprintWorker = new Worker(
         );
       }
 
-      // 更新文档状态
+      // 更新文档状态，清空 content 节省存储
       await pool.query(
-        'UPDATE documents SET word_count = $1, block_count = $2, status = $3 WHERE id = $4',
+        'UPDATE documents SET word_count = $1, block_count = $2, status = $3, content = NULL WHERE id = $4',
         [content.length, blocks.length, 'ready', documentId]
       );
 
@@ -117,6 +118,33 @@ fingerprintWorker.on('completed', (job) => {
 fingerprintWorker.on('failed', (job, err) => {
   logger.error(`Job ${job?.id} failed: ${err?.message ?? String(err)}`);
 });
+
+// 章节标题正则
+const CHAPTER_RE_W = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|序章|终章|后记|前言|楔子|尾声)/i;
+
+// 将行列表合并成较大的块（目标 ≥300 字符），章节标题单独成块
+function groupBlocks(lines: string[], targetSize = 300): string[] {
+  const result: string[] = [];
+  let current: string[] = [];
+  let currentLen = 0;
+  const flush = () => {
+    if (current.length > 0) {
+      result.push(current.join('\n'));
+      current = [];
+      currentLen = 0;
+    }
+  };
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) { flush(); continue; }
+    if (CHAPTER_RE_W.test(line)) { flush(); result.push(line); continue; }
+    current.push(line);
+    currentLen += line.length;
+    if (currentLen >= targetSize) flush();
+  }
+  flush();
+  return result;
+}
 
 // 计算 SimHash (简化版本)
 function computeSimHash(text: string): string {
