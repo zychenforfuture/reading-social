@@ -5,6 +5,18 @@ import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { documentQueue } from '../config/queue.js';
 
+/** 与 comment.ts 保持一致的归一化：去掉空白+标点，只保留纯文字 */
+function normalizeLine(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[\u3000-\u303f\uff00-\uffef]/g, c => {
+      const cp = c.codePointAt(0)!;
+      return cp >= 0xff01 && cp <= 0xff5e ? String.fromCodePoint(cp - 0xfee0) : c;
+    })
+    .replace(/[^\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af\w]/g, '');
+}
+
 const router: Router = Router();
 
 // 上传文档验证 schema
@@ -150,9 +162,9 @@ router.get('/:id/comments', async (req, res) => {
     const lineHashToBlockHash = new Map<string, string>();
     for (const row of blocksResult.rows) {
       for (const rawLine of (row.raw_content as string).split('\n')) {
-        const line = rawLine.trim();
-        if (!line) continue;
-        const h = createHash('md5').update(line).digest('hex');
+        const normalized = normalizeLine(rawLine);
+        if (!normalized) continue;
+        const h = createHash('md5').update(normalized).digest('hex');
         if (!lineHashToBlockHash.has(h)) lineHashToBlockHash.set(h, row.block_hash);
       }
     }
