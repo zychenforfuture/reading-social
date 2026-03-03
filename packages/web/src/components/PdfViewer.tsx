@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { ContentBlock } from '../lib/utils';
 
-// 使用 CDN worker，避免 Vite worker 打包问题
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+// 基础显示缩放（CSS 像素），高清屏会在此基础上乘以 devicePixelRatio
+const BASE_SCALE = 1.5;
 
 interface PdfViewerProps {
   documentId: string;
@@ -23,6 +25,8 @@ export default function PdfViewer({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [renderedPages, setRenderedPages] = useState<Set<number>>(new Set());
+  // 每页 CSS 显示尺寸，渲染后用于固定容器宽高
+  const [pageSizes, setPageSizes] = useState<Map<number, { w: number; h: number }>>(new Map());
 
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   // 每页的 container div ref
@@ -37,6 +41,7 @@ export default function PdfViewer({
     setLoadError('');
     setNumPages(0);
     setRenderedPages(new Set());
+    setPageSizes(new Map());
 
     pdfjsLib.getDocument({ url: pdfUrl, cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`, cMapPacked: true })
       .promise
@@ -67,46 +72,50 @@ export default function PdfViewer({
     if (!canvas) return;
 
     const page = await pdfDocRef.current.getPage(pageNum);
-    const scale = Math.min(1.5, window.innerWidth > 900 ? 1.5 : window.innerWidth / 600);
-    const viewport = page.getViewport({ scale });
+    const dpr = window.devicePixelRatio || 1;
 
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
+    // 显示用 viewport（CSS 像素）：供 text layer 定位坐标及 canvas CSS 尺寸
+    const displayViewport = page.getViewport({ scale: BASE_SCALE });
+    // 高清渲染 viewport（物理像素 = CSS像素 × DPR）
+    const hiDpiViewport = page.getViewport({ scale: BASE_SCALE * dpr });
+
+    // canvas 物理分辨率 = hiDpi，但 CSS 显示尺寸 = display
+    canvas.width = hiDpiViewport.width;
+    canvas.height = hiDpiViewport.height;
+    canvas.style.width = `${displayViewport.width}px`;
+    canvas.style.height = `${displayViewport.height}px`;
+    canvas.style.display = 'block';
 
     const ctx = canvas.getContext('2d')!;
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({ canvasContext: ctx, viewport: hiDpiViewport }).promise;
 
-    // 文字层（用于文本选择）
+    // text layer 使用 displayViewport，坐标与 canvas CSS 尺寸完全对齐
     if (textLayerDiv) {
       textLayerDiv.innerHTML = '';
-      textLayerDiv.style.width = `${viewport.width}px`;
-      textLayerDiv.style.height = `${viewport.height}px`;
+      textLayerDiv.style.width = `${displayViewport.width}px`;
+      textLayerDiv.style.height = `${displayViewport.height}px`;
       const textContent = await page.getTextContent();
       try {
-        // pdfjs-dist 4.x API (renderTextLayer 未在类型定义中导出，用 any 绕过)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const pdfjs = pdfjsLib as any;
-        const renderTask = pdfjs.renderTextLayer({
+        // 关键：传 displayViewport（非 hiDpiViewport），span 坐标才与 canvas 对齐
+        const task = pdfjs.renderTextLayer({
           textContentSource: textContent,
           container: textLayerDiv,
-          viewport,
+          viewport: displayViewport,
         });
-        await (renderTask as { promise: Promise<void> }).promise;
+        await (task as { promise: Promise<void> }).promise;
       } catch {
-        // fallback: pdfjs-dist 3.x API
-        try {
-          const renderTask2 = (pdfjsLib as unknown as {
-            renderTextLayer: (o: object) => { promise: Promise<void> };
-          }).renderTextLayer({ textContent, container: textLayerDiv, viewport });
-          await renderTask2.promise;
-        } catch {
-          // 如果文字层失败，静默忽略，继续 canvas-only 模式
-        }
+        // text layer 失败时静默降级
       }
     }
 
+    // 记录 CSS 显示尺寸，供容器占位
+    setPageSizes((prev) => {
+      const next = new Map(prev);
+      next.set(pageNum, { w: displayViewport.width, h: displayViewport.height });
+      return next;
+    });
     setRenderedPages((prev) => new Set(prev).add(pageNum));
   }, []);
 
@@ -121,19 +130,22 @@ export default function PdfViewer({
     return () => clearTimeout(timer);
   }, [numPages, renderPage]);
 
-  // 鼠标抬起：检测文字选择 → 匹配 block
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
     const selectedText = selection.toString().trim();
-    if (selectedText.length < 4) return;
+    if (selectedText.length < 2) return;
 
-    // 在已加载的 blocks 中找包含选中文字的 block
-    const matched = blocks.find((b) => {
-      const content = b.raw_content.replace(/\s+/g, ' ').trim();
-      const query = selectedText.replace(/\s+/g, ' ').trim();
-      return content.includes(query) || query.includes(content.slice(0, Math.min(40, content.length)));
-    });
+    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+    const query = norm(selectedText);
+
+    // 先精确包含，再宽松前缀匹配
+    const matched =
+      blocks.find((b) => norm(b.raw_content).includes(query)) ||
+      blocks.find((b) => {
+        const content = norm(b.raw_content);
+        return query.includes(content.slice(0, Math.min(30, content.length)));
+      });
 
     if (matched) {
       onSelectBlock(matched.block_hash, selectedText);
@@ -168,47 +180,61 @@ export default function PdfViewer({
         {' · '}划选文字可添加评论
       </div>
 
-      {/* 每页 */}
-      {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
-        <div
-          key={pageNum}
-          ref={(el) => {
-            if (el) pageContainerRefs.current.set(pageNum, el);
-            else pageContainerRefs.current.delete(pageNum);
-          }}
-          className="relative rounded-xl overflow-hidden shadow-sm border bg-white"
-          style={{ lineHeight: 0 }}
-        >
-          {/* Canvas（视觉层） */}
-          <canvas className="block w-full" />
+      {/* 水平居中；超宽时横向滚动 */}
+      <div className="flex flex-col items-center gap-4 overflow-x-auto">
+        {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => {
+          const size = pageSizes.get(pageNum);
+          return (
+            <div
+              key={pageNum}
+              ref={(el) => {
+                if (el) pageContainerRefs.current.set(pageNum, el);
+                else pageContainerRefs.current.delete(pageNum);
+              }}
+              className="relative rounded-xl overflow-hidden shadow-sm border bg-white"
+              style={{
+                // 渲染完成前用占位高度；渲染完成后 canvas 自然撑开
+                width: size ? size.w : undefined,
+                minHeight: size ? undefined : 800,
+                lineHeight: 0,
+              }}
+            >
+              {/* 高清 Canvas */}
+              <canvas />
 
-          {/* Text layer（透明，可选中文字） */}
-          <div
-            className="pdf-text-layer absolute inset-0 overflow-hidden"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              transformOrigin: '0 0',
-              userSelect: 'text',
-            }}
-          />
+              {/* Text layer：透明覆盖，坐标与 canvas 完全对齐 */}
+              <div
+                className="pdf-text-layer"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  overflow: 'hidden',
+                  userSelect: 'text',
+                  transformOrigin: '0 0',
+                }}
+              />
 
-          {/* 页码 */}
-          {renderedPages.has(pageNum) && (
-            <div className="absolute bottom-2 right-2 text-[10px] text-gray-400 bg-white/80 rounded px-1.5 py-0.5 select-none pointer-events-none">
-              {pageNum} / {numPages}
+              {/* 页码徽章 */}
+              {renderedPages.has(pageNum) && (
+                <div className="absolute bottom-2 right-2 text-[10px] text-gray-400 bg-white/80 rounded px-1.5 py-0.5 select-none pointer-events-none">
+                  {pageNum} / {numPages}
+                </div>
+              )}
+
+              {/* 渲染前占位 */}
+              {!renderedPages.has(pageNum) && (
+                <div
+                  className="flex items-center justify-center bg-gray-50"
+                  style={{ width: '100%', height: 800 }}
+                >
+                  <span className="text-xs text-muted-foreground">渲染中…</span>
+                </div>
+              )}
             </div>
-          )}
-
-          {/* 未渲染占位 */}
-          {!renderedPages.has(pageNum) && (
-            <div className="flex items-center justify-center bg-gray-50" style={{ height: 800 }}>
-              <span className="text-xs text-muted-foreground">渲染中…</span>
-            </div>
-          )}
-        </div>
-      ))}
+          );
+        })}
+      </div>
     </div>
   );
 }
