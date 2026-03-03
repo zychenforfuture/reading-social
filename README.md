@@ -14,6 +14,9 @@
 | **章节评论汇总** | 文档底部按章节汇总全部批注，脱离右侧面板也可浏览 |
 | **语义相似推荐** | 基于向量嵌入（Qdrant）推荐语义相近的段落及其批注 |
 | **大文件处理** | 10 MB+ 文档通过 Web Worker + BullMQ 异步解析，不阻塞主线程 |
+| **大文档分页加载** | 10 万+ 段落文档通过 JOIN 分页查询流式加载，首屏秒开 |
+| **阅读记忆** | 自动记录每篇文档的最后阅读章节，刷新/重开后自动恢复 |
+| **仿书排版** | 首行缩进、行高 2.0、章节标题居中加粗、前言章节自动识别 |
 | **邮箱 OTP 注册** | 注册和重置密码均通过 6 位验证码完成，无需点击链接 |
 | **管理员权限** | 管理员可上传文档、查看上传者信息 |
 
@@ -40,6 +43,7 @@
 ### 基础设施
 - **Docker Compose** — 一键本地 / 生产部署
 - **Nginx** — 前端静态托管 + API 反代
+- **本地 volumes/** — postgres / redis / qdrant 数据持久化到项目目录，便于备份
 
 ## 项目结构
 
@@ -52,6 +56,10 @@ reading/
 ├── docker/
 │   ├── nginx/      # Nginx 配置
 │   └── postgres/   # 数据库初始化 SQL
+├── volumes/        # 数据库持久化目录（gitignore）
+│   ├── postgres/data/
+│   ├── redis/
+│   └── qdrant/
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
 └── pnpm-workspace.yaml
@@ -81,6 +89,14 @@ REDIS_PASSWORD=
 JWT_SECRET=
 FRONTEND_URL=https://your-domain.com
 
+# 初始管理员账号（首次启动若该邮箱不存在则自动创建，留空跳过）
+ADMIN_INIT_EMAIL=admin@example.com
+ADMIN_INIT_USERNAME=admin
+ADMIN_INIT_PASSWORD=your-password
+
+# 管理员邮箱列表（逗号分隔，用于同步 is_admin 标记）
+ADMIN_EMAILS=admin@example.com
+
 # 阿里云 SMTP（邮箱验证码）
 SMTP_HOST=smtpdm.aliyun.com
 SMTP_PORT=465
@@ -98,11 +114,6 @@ SMTP_FROM=your@domain.com
 | `/forgot-password` | 重置密码（邮箱 OTP 验证） |
 | `/` | 文档列表首页 |
 | `/documents/:id` | 文档阅读 & 批注页 |
-
-## License
-
-MIT
-
 
 ## 许可证
 
