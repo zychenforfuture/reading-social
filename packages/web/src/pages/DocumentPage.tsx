@@ -513,7 +513,7 @@ export default function DocumentPage() {
   }
 
   return (
-    <div className="space-y-4 pb-6">
+    <div className="space-y-4 pb-6 max-w-[740px] mx-auto">
       {/* 后台继续加载，不显示进度提示 */}
       {/* 标题行 */}
       <div className="flex items-center justify-between">
