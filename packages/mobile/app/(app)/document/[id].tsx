@@ -606,11 +606,25 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
 
   // Block
-  block: { marginBottom: 0, paddingVertical: 4 },
+  block: { marginBottom: 0, paddingVertical: 4, position: 'relative' },
   headingBlock: { marginTop: 14, marginBottom: 2 },
   blockText: { color: '#1a1a1a' },
-  // 末尾内联评论数气泡
-  inlineBadge: { fontSize: 11, color: '#bbb', fontWeight: '600' },
+  // 末尾评论数气泡（绝对定位在右下角）
+  inlineBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 6,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    backgroundColor: '#fff',
+  },
+  inlineBadgeText: { fontSize: 11, color: '#f97316', fontWeight: '700', lineHeight: 14 },
 
   // 分页加载提示
   loadMoreIndicator: {
