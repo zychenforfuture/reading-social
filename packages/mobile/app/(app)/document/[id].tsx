@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { documents, comments } from '../../../lib/api';
 import { useAuthStore } from '../../../lib/store';
 import type { Block, Comment, CommentWithReplies } from '../../../lib/api';
@@ -70,6 +71,7 @@ export default function DocumentPage() {
   const docId = id as string;
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
+  const insets = useSafeAreaInsets();
 
   // ── 分页状态 ────────────────────────────────────────────────────────────
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -352,7 +354,7 @@ export default function DocumentPage() {
       </View>
 
       {/* Chapter nav bar */}
-      <View style={styles.chapterNavBar}>
+      <View style={[styles.chapterNavBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <TouchableOpacity
           style={[styles.chapterNavBtn, currentChapterIdx === 0 && styles.chapterNavBtnDisabled]}
           disabled={currentChapterIdx === 0}
