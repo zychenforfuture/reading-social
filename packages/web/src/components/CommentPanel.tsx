@@ -434,7 +434,7 @@ export default function CommentPanel({
               </button>
               <button
                 onClick={() => setSortMode('newest')}
-                className={cn('flex items-center gap-0.5 px-2 py-1 transition-colors', sortMode === 'newest' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}
+                className={cn('flex items-center gap-0.5 px-2 py-1 transition-colors', sortMode === 'newest' ? 'bg-orange-500 text-white' : 'text-muted-foreground hover:bg-muted')}
               >
                 <Clock className="h-3 w-3" />
                 最新
