@@ -1,5 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { MessageSquare } from 'lucide-react';
+import { useRef } from 'react';
 import { type ContentBlock, type Comment } from '../lib/utils';
 
 interface EditorProps {
@@ -8,13 +7,6 @@ interface EditorProps {
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
   onClickCommentBubble: (commentIds: string[], block: { hash: string; text: string }) => void;
-}
-
-interface Tooltip {
-  x: number;
-  y: number;
-  blockHash: string;
-  text: string;
 }
 
 // 章节标题识别正则
@@ -26,38 +18,7 @@ const isHeadingLine = (line: string) => {
 };
 
 export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble }: EditorProps) {
-  const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { setTooltip(null); }, [content]);
-
-  const handleMouseUp = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-      setTooltip(null);
-      return;
-    }
-    const selectedText = selection.toString().trim();
-    const anchorNode = selection.anchorNode;
-    if (!anchorNode || !containerRef.current) { setTooltip(null); return; }
-
-    let node: Node | null = anchorNode;
-    while (node && node.nodeType !== Node.ELEMENT_NODE) node = node.parentNode;
-    let el = node as Element | null;
-    while (el && !el.hasAttribute('data-block-hash')) el = el.parentElement;
-    if (!el || !containerRef.current.contains(el)) { setTooltip(null); return; }
-
-    const blockHash = el.getAttribute('data-block-hash')!;
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    setTooltip({ x: rect.left + rect.width / 2, y: rect.top, blockHash, text: selectedText });
-  }, []);
-
-  useEffect(() => {
-    const hide = () => setTooltip(null);
-    window.addEventListener('scroll', hide, true);
-    return () => window.removeEventListener('scroll', hide, true);
-  }, []);
 
   return (
     <div
@@ -67,14 +28,13 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
     >
       {/* 顶部提示 */}
       <div className="flex justify-end px-8 pt-5 pb-0">
-        <span className="text-xs text-gray-300 select-none">选中文字可发表评论</span>
+        <span className="text-xs text-gray-300 select-none">点击句子可发表评论</span>
       </div>
 
       {/* 正文渲染区 */}
       <div
         className="min-h-[500px] select-text"
         style={{ padding: '2rem 3.5rem 4rem' }}
-        onMouseUp={handleMouseUp}
       >
         {content.map((block, blockIdx) => {
           const totalCount = blockCommentCount[block.block_hash] ?? 0;
@@ -159,13 +119,17 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
                 return (
                   <p
                     key={lineIdx}
-                    className="text-gray-800 break-words"
+                    className="text-gray-800 break-words cursor-pointer rounded transition-colors hover:bg-orange-50/60"
                     style={{
                       fontSize: '17px',
                       lineHeight: '2.0',
                       textIndent: '2em',
                       marginBottom: isDialogue ? '0' : '0.1em',
                       letterSpacing: '0.02em',
+                    }}
+                    onClick={() => {
+                      if (window.getSelection()?.toString().trim()) return;
+                      onSelectBlock(block.block_hash, trimmed);
                     }}
                   >
                     {trimmed}
@@ -186,47 +150,6 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
           );
         })}
       </div>
-
-      {/* 浮动评论气泡 */}
-      {tooltip && (
-        <div
-          style={{
-            position: 'fixed',
-            left: tooltip.x,
-            top: tooltip.y - 8,
-            transform: 'translateX(-50%) translateY(-100%)',
-            zIndex: 50,
-          }}
-          className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-1.5"
-        >
-          <MessageSquare className="h-3.5 w-3.5 text-orange-500" />
-          <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onSelectBlock(tooltip.blockHash, tooltip.text);
-              setTooltip(null);
-              window.getSelection()?.removeAllRanges();
-            }}
-            className="text-sm font-medium text-orange-500 whitespace-nowrap hover:underline"
-            style={{ fontFamily: 'system-ui, sans-serif' }}
-          >
-            评论选中文字
-          </button>
-          <span
-            style={{
-              position: 'absolute',
-              bottom: -6,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '6px solid transparent',
-              borderRight: '6px solid transparent',
-              borderTop: '6px solid #e5e7eb',
-            }}
-          />
-        </div>
-      )}
     </div>
   );
 }
