@@ -250,6 +250,8 @@ export default function DocumentPage() {
   const savedChapterRef = useRef(0);
   // 每篇文档只恢复一次，避免后续批量加载时反复跳转
   const restoredRef = useRef(false);
+  // 刷新时恢复的滚动位置（null = 不恢复）
+  const pendingScrollRef = useRef<number | null>(null);
 
   // 文档切换时读取上次阅读位置
   useEffect(() => {
@@ -262,6 +264,20 @@ export default function DocumentPage() {
     } catch {
       savedChapterRef.current = 0;
     }
+  }, [id]);
+
+  // 滚动时实时保存位置（防抖 400ms）
+  useEffect(() => {
+    if (!id) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        try { localStorage.setItem(`doc-scroll-${id}`, String(Math.round(window.scrollY))); } catch {}
+      }, 400);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); if (timer) clearTimeout(timer); };
   }, [id]);
 
   // 分批加载所有块
@@ -413,10 +429,19 @@ export default function DocumentPage() {
     if (restoredRef.current) return;
     restoredRef.current = true;
     const target = Math.max(0, Math.min(chapters.length - 1, savedChapterRef.current));
-    if (target > 0) {
-      setCurrentChapter(target);
-      window.scrollTo({ top: 0 });
-    }
+    if (target > 0) setCurrentChapter(target);
+    // 读取上次滚动位置，等内容渲染后恢复
+    try {
+      const savedY = localStorage.getItem(`doc-scroll-${id}`);
+      const y = savedY ? parseInt(savedY, 10) : 0;
+      if (target > 0) {
+        // chapter 会变化，由 useEffect([currentChapter]) 负责滚动
+        pendingScrollRef.current = y;
+      } else {
+        // chapter 不变（已是 0），直接用 rAF 恢复
+        requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: y })));
+      }
+    } catch {}
   }, [chapters.length]);
 
   const chapter = chapters[currentChapter];
@@ -424,12 +449,23 @@ export default function DocumentPage() {
     ? allBlocks.slice(chapter.blockStart, chapter.blockStart + chapter.blockCount)
     : allBlocks;
 
+  // 章节内容切换后恢复滚动位置（刷新时）或回顶（手动翻章节时）
+  useEffect(() => {
+    if (pendingScrollRef.current === null) return;
+    const y = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    // 双 rAF 确保 DOM 已完整渲染再滚动
+    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: y })));
+  }, [currentChapter]);
+
   const goTo = (idx: number) => {
     const target = Math.max(0, Math.min(chapters.length - 1, idx));
     setCurrentChapter(target);
     setSelectedBlock(null);
     setShowComments(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // 翻章节时清零滚动记录，确保到新章节顶部
+    try { if (id) localStorage.removeItem(`doc-scroll-${id}`); } catch {}
+    pendingScrollRef.current = 0; // 让 useEffect 滚到顶
     try { if (id) localStorage.setItem(`doc-chapter-${id}`, String(target)); } catch {}
   };
 
