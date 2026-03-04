@@ -189,11 +189,15 @@ export interface Comment {
   block_hash: string;
   user_id: string;
   username: string;
+  avatar_url?: string;
   content: string;
   parent_comment_id: string | null;
   root_id: string | null;
   reply_to_user_id: string | null;
+  reply_to_username?: string;
+  selected_text?: string;
   like_count: number;
+  liked_by_me?: boolean;
   reply_count: number;
   created_at: string;
 }
