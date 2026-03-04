@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,47 @@ import CommentItem from '../../../components/CommentItem';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PAGE_SIZE = 2000;
 
+// ── 章节结构（与 web 端 DocumentPage.tsx 对齐）────────────────────────────
+const CHAPTER_RE = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+)/i;
+
+interface Chapter {
+  index: number;
+  title: string;
+  blockStart: number;
+  blockCount: number;
+}
+
+function buildChapters(blocks: Block[]): Chapter[] {
+  if (blocks.length === 0) return [];
+  const headingIndexes: number[] = [];
+  blocks.forEach((b, i) => {
+    const firstLine = b.content.split('\n')[0]?.trim() ?? '';
+    if (CHAPTER_RE.test(firstLine)) headingIndexes.push(i);
+  });
+  if (headingIndexes.length >= 1) {
+    const chapters: Chapter[] = [];
+    if (headingIndexes[0] > 0) {
+      chapters.push({ index: 0, title: '前言', blockStart: 0, blockCount: headingIndexes[0] });
+    }
+    headingIndexes.forEach((start, idx) => {
+      const end = headingIndexes[idx + 1] ?? blocks.length;
+      const title = blocks[start]!.content.split('\n')[0]!.trim();
+      chapters.push({ index: chapters.length, title, blockStart: start, blockCount: end - start });
+    });
+    return chapters.map((c, i) => ({ ...c, index: i }));
+  }
+  // 降级：每 20 块自动分章
+  const chapters: Chapter[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const start = i;
+    const end = Math.min(i + 20, blocks.length);
+    chapters.push({ index: chapters.length, title: `第 ${chapters.length + 1} 部分`, blockStart: start, blockCount: end - start });
+    i = end;
+  }
+  return chapters;
+}
+
 export default function DocumentPage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const docId = id as string;
@@ -44,9 +85,13 @@ export default function DocumentPage() {
   const [scrollProgress, setScrollProgress] = useState(0);
   const [commentSort, setCommentSort] = useState<'newest' | 'oldest' | 'hot'>('newest');
   const [showToc, setShowToc] = useState(false);
+  const [currentChapterIdx, setCurrentChapterIdx] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   // heading hash → ScrollView 内的 Y 偏移
   const headingOffsets = useRef<Record<string, number>>({});
+  // 章节列表（由 blocks 派生，不对外武露）
+  const chapters = useMemo(() => buildChapters(blocks), [blocks]);
+  const currentChapter = chapters[currentChapterIdx] ?? null;
 
   // ── 首屏加载 ─────────────────────────────────────────────────────────────
   const { isLoading, error, data: firstPageData } = useQuery({
@@ -143,7 +188,16 @@ export default function DocumentPage() {
     createMutation.mutate(body);
   };
 
-  // ── 滚动监听：进度 + 触底翻页 ────────────────────────────────────────────
+  const goToChapter = useCallback((idx: number) => {
+    const ch = chapters[idx];
+    if (!ch) return;
+    const startBlock = blocks[ch.blockStart];
+    const y = startBlock ? (headingOffsets.current[startBlock.hash] ?? 0) : 0;
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 20), animated: true });
+    setCurrentChapterIdx(idx);
+  }, [chapters, blocks]);
+
+  // ── 滚动监听：进度 + 触底翻页 + 当前章节 ────────────────────────────────
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -151,13 +205,21 @@ export default function DocumentPage() {
       if (totalScrollable > 0) {
         const progress = contentOffset.y / totalScrollable;
         setScrollProgress(Math.min(1, Math.max(0, progress)));
-        // 距底部 300px 时触发分页
         if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 300) {
           loadMore();
         }
+        // 更新当前章节
+        const y = contentOffset.y;
+        let newIdx = 0;
+        for (let i = 0; i < chapters.length; i++) {
+          const sb = blocks[chapters[i].blockStart];
+          const blockY = chapters[i].blockStart === 0 ? 0 : (sb ? (headingOffsets.current[sb.hash] ?? -1) : -1);
+          if (blockY >= 0 && blockY <= y + 80) newIdx = i;
+        }
+        setCurrentChapterIdx(newIdx);
       }
     },
-    [loadMore]
+    [loadMore, blocks, chapters]
   );
 
   // ── 渲染单个段落 ──────────────────────────────────────────────────────────
@@ -289,11 +351,32 @@ export default function DocumentPage() {
         <View style={[styles.progressFill, { width: progressPercent as any }]} />
       </View>
 
-      {/* Bottom status bar */}
-      <View style={styles.bottomBar}>
-        <Text style={styles.bottomBarText}>{blocks.length} 段</Text>
-        <Text style={styles.bottomBarText}>{progressPercent}</Text>
-        {hasMore && <Text style={styles.bottomBarMore}>更多未加载</Text>}
+      {/* Chapter nav bar */}
+      <View style={styles.chapterNavBar}>
+        <TouchableOpacity
+          style={[styles.chapterNavBtn, currentChapterIdx === 0 && styles.chapterNavBtnDisabled]}
+          disabled={currentChapterIdx === 0}
+          onPress={() => goToChapter(currentChapterIdx - 1)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={[styles.chapterNavBtnText, currentChapterIdx === 0 && styles.chapterNavBtnTextDisabled]}>‹ 上一章</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.chapterNavCenter} onPress={() => setShowToc(true)} activeOpacity={0.7}>
+          <Text style={styles.chapterNavTitle} numberOfLines={1}>
+            {currentChapter?.title ?? docMeta?.title ?? ''}
+          </Text>
+          <Text style={styles.chapterNavProgress}>
+            {chapters.length > 0 ? `${currentChapterIdx + 1} / ${chapters.length}` : progressPercent}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chapterNavBtn, currentChapterIdx >= chapters.length - 1 && styles.chapterNavBtnDisabled]}
+          disabled={currentChapterIdx >= chapters.length - 1}
+          onPress={() => goToChapter(currentChapterIdx + 1)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={[styles.chapterNavBtnText, currentChapterIdx >= chapters.length - 1 && styles.chapterNavBtnTextDisabled]}>下一章 ›</Text>
+        </TouchableOpacity>
       </View>
 
       {/* TOC Modal */}
@@ -557,19 +640,28 @@ const styles = StyleSheet.create({
   progressBar: { height: 2, backgroundColor: '#e0e0e0' },
   progressFill: { height: 2, backgroundColor: '#888' },
 
-  // Bottom bar
-  bottomBar: {
+  // Chapter nav bar
+  chapterNavBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 6,
-    backgroundColor: '#f5f4ef',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fafaf8',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#e5e5e5',
+    gap: 4,
   },
-  bottomBarText: { fontSize: 12, color: '#bbb' },
-  bottomBarMore: { fontSize: 11, color: '#f59e0b', fontWeight: '600' },
+  chapterNavBtn: { paddingHorizontal: 8, paddingVertical: 4 },
+  chapterNavBtnDisabled: { opacity: 0.3 },
+  chapterNavBtnText: { fontSize: 13, color: '#374151', fontWeight: '600' },
+  chapterNavBtnTextDisabled: { color: '#9ca3af' },
+  chapterNavCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  chapterNavTitle: { fontSize: 13, fontWeight: '600', color: '#111827', maxWidth: '100%' },
+  chapterNavProgress: { fontSize: 11, color: '#9ca3af', marginTop: 1 },
 
   // Drawer
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.28)' },
