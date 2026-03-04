@@ -19,14 +19,20 @@
 | **仿书排版** | 首行缩进、行高 2.0、章节标题居中加粗、前言章节自动识别 |
 | **邮箱 OTP 注册** | 注册和重置密码均通过 6 位验证码完成，无需点击链接 |
 | **管理员权限** | 管理员可上传文档、查看上传者信息 |
+| **个人资料** | 支持预设头像（DiceBear）或本地图片上传（base64），以及在线修改密码 |
 
 ## 技术栈
 
 ### 前端（`packages/web`）
-- **React 18** + TypeScript + Vite
-- **TanStack Query** — 服务端状态与乐观更新
+- **React 19** + TypeScript + Vite
+- **React Router v7** — 客户端路由
+- **TanStack Query v5** — 服务端状态与乐观更新
+- **TanStack Virtual** — 长列表虚拟滚动
+- **TipTap** — 富文本评论编辑器（Highlight、Placeholder 扩展）
+- **Yjs + y-websocket** — 协同实时同步基础设施
+- **Radix UI** — 无障碍 UI 原语（Dialog、DropdownMenu、Tooltip 等）
 - **Zustand** — 客户端用户状态持久化
-- **Tailwind CSS** — 样式
+- **Tailwind CSS v4** — 样式
 - **Web Worker** — 大文件客户端预处理
 
 ### 后端（`packages/api`）
@@ -40,6 +46,9 @@
 ### Worker（`packages/worker`）
 - BullMQ Worker，负责文档解析、段落切割、向量入库
 
+### 移动端（`packages/mobile`）
+- **Expo**（React Native）— 移动端应用（开发中）
+
 ### 基础设施
 - **Docker Compose** — 一键本地 / 生产部署
 - **Nginx** — 前端静态托管 + API 反代
@@ -51,8 +60,9 @@
 reading/
 ├── packages/
 │   ├── api/        # Express API 服务
-│   ├── web/        # React 前端
-│   └── worker/     # BullMQ 后台工作进程
+│   ├── web/        # React 19 前端
+│   ├── worker/     # BullMQ 后台工作进程
+│   └── mobile/     # Expo 移动端（开发中）
 ├── docker/
 │   ├── nginx/      # Nginx 配置
 │   └── postgres/   # 数据库初始化 SQL
@@ -114,6 +124,7 @@ SMTP_FROM=your@domain.com
 | `/forgot-password` | 重置密码（邮箱 OTP 验证） |
 | `/` | 文档列表首页 |
 | `/documents/:id` | 文档阅读 & 批注页 |
+| `/profile` | 个人资料（头像设置、修改密码） |
 
 ## 许可证
 
