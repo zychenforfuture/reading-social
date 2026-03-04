@@ -9,6 +9,7 @@ interface AuthState {
   login: (token: string, user: User) => Promise<void>;
   logout: () => Promise<void>;
   loadFromStorage: () => Promise<void>;
+  updateUser: (user: User) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -33,5 +34,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     const userStr = await SecureStore.getItemAsync('auth_user');
     const user = userStr ? (JSON.parse(userStr) as User) : null;
     set({ token, user, initialized: true });
+  },
+
+  updateUser: async (user: User) => {
+    await SecureStore.setItemAsync('auth_user', JSON.stringify(user));
+    set({ user });
   },
 }));

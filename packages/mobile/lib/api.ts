@@ -48,26 +48,39 @@ export const auth = {
       method: 'POST',
       body: JSON.stringify({ email, code, password }),
     }),
+  updateProfile: (avatarUrl: string) =>
+    request<{ user: User }>('/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify({ avatar_url: avatarUrl }),
+    }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<{ message: string }>('/auth/change-password', {
+      method: 'PATCH',
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    }),
 };
 
 // Documents
 export const documents = {
   list: () =>
     request<{ documents: Document[] }>('/documents').then((r) => r.documents),
-  get: (id: string) =>
-    request<{ document: Document; content: RawBlock[] }>(`/documents/${id}`).then(
+  get: (id: string, offset = 0, limit = 2000) =>
+    request<{ document: Document; content: RawBlock[]; pagination?: { offset: number; limit: number; total: number; hasMore: boolean } }>(
+      `/documents/${id}?offset=${offset}&limit=${limit}`
+    ).then(
       (r) => ({
         ...r.document,
+        pagination: r.pagination,
         blocks: (r.content || []).map((b, i) => ({
-          id: i,
+          id: offset + i,
           hash: b.block_hash,
           type: detectBlockType(b.raw_content),
           content: b.raw_content,
-          order_index: i,
+          order_index: offset + i,
           heading_level: getHeadingLevel(b.raw_content),
           word_count: b.word_count,
         })),
-      }) as DocumentDetail
+      }) as DocumentDetail & { pagination?: { offset: number; limit: number; total: number; hasMore: boolean } }
     ),
   getBlockCommentCounts: (id: string) =>
     request<{ blockCommentCount: Record<string, number> }>(`/documents/${id}/comments`)
@@ -127,6 +140,7 @@ export interface User {
   email: string;
   username: string;
   is_admin: boolean;
+  avatar_url?: string;
 }
 
 export interface Document {

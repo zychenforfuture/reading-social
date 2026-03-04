@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -100,6 +101,15 @@ export default function DocumentListPage() {
               )}
             </TouchableOpacity>
           )}
+          <TouchableOpacity onPress={() => router.push('/(app)/profile')} style={styles.avatarBtn}>
+            {user?.avatar_url ? (
+              <Image source={{ uri: user.avatar_url }} style={styles.avatarImg} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarFallbackText}>{(user?.username || '?')[0].toUpperCase()}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity onPress={handleLogout} style={styles.headerBtn}>
             <Text style={styles.headerBtnText}>退出</Text>
           </TouchableOpacity>
@@ -153,6 +163,19 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   headerBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  avatarBtn: { marginLeft: 4 },
+  avatarImg: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
+  avatarFallback: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  avatarFallbackText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   list: { padding: 16, gap: 12 },
   card: {
     backgroundColor: '#fff',
