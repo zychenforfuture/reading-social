@@ -7,6 +7,13 @@ dist/
 **/dist/
 build/
 
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+
+# Vite 编译产物
+packages/web/vite.config.d.ts
+packages/web/vite.config.js
+
 # 环境变量（保留 .env.example 作为模板）
 .env
 .env.local
