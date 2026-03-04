@@ -621,17 +621,6 @@ export default function CommentPanel({
 
         {/* 底部输入区 */}
         <div className="border-t bg-white dark:bg-zinc-900 px-4 py-3 space-y-2">
-          {/* 当前引用 */}
-          {selectedBlock && (
-            <div className="flex items-start gap-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-              <div className="flex-1 line-clamp-2 border-l-2 border-primary pl-2 leading-relaxed">
-                {selectedBlock.text}
-              </div>
-              <button onClick={onClearSelection} className="shrink-0 hover:text-foreground">
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          )}
           <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}
@@ -642,7 +631,7 @@ export default function CommentPanel({
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
               }}
               rows={2}
-              placeholder={selectedBlock ? '写下你的评论… (⌘Enter 发送)' : '选中文字后发表评论'}
+              placeholder={selectedBlock ? '写下你的评论… (⌘Enter 发送)' : '点击正文句子开始评论'}
               className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-40"
             />
             <button
