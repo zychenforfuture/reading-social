@@ -21,8 +21,9 @@ CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
-    content TEXT,                   -- 原始文本，用于重新分块
+    content TEXT,                   -- 原始文本，用于重新分块（处理完成后置 NULL）
     file_hash VARCHAR(64),          -- 整文件 MD5 (秒传用)
+    canonical_document_id UUID REFERENCES documents(id) ON DELETE CASCADE, -- 跨用户去重引用
     word_count INTEGER DEFAULT 0,
     block_count INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'processing',  -- processing, ready, error
@@ -32,12 +33,12 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX idx_documents_user_id ON documents(user_id);
 CREATE INDEX idx_documents_file_hash ON documents(file_hash);
 CREATE INDEX idx_documents_status ON documents(status);
+CREATE INDEX idx_documents_canonical ON documents(canonical_document_id);
 
 -- 内容块表 (核心表)
 CREATE TABLE IF NOT EXISTS content_blocks (
     block_hash VARCHAR(64) PRIMARY KEY,
     raw_content TEXT NOT NULL,
-    normalized_content TEXT,
     word_count INTEGER DEFAULT 0,
     occurrence_count INTEGER DEFAULT 1,  -- 在多少文档中出现
     similarity_hash VARCHAR(64),  -- SimHash 用于模糊匹配
@@ -64,7 +65,13 @@ CREATE TABLE IF NOT EXISTS comments (
     block_hash VARCHAR(64) REFERENCES content_blocks(block_hash) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     parent_comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,  -- 支持回复
+    root_id UUID REFERENCES comments(id) ON DELETE CASCADE,            -- 二级回复根评论
+    reply_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     content TEXT NOT NULL,
+    selected_text VARCHAR(500),        -- 用户选中的原文片段
+    sentence_hash VARCHAR(64),         -- MD5(selected_text) 用于跨文档评论共享
+    like_count INTEGER NOT NULL DEFAULT 0,
+    reply_count INTEGER NOT NULL DEFAULT 0,
     is_resolved BOOLEAN DEFAULT FALSE,
     is_deleted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -73,6 +80,8 @@ CREATE TABLE IF NOT EXISTS comments (
 CREATE INDEX idx_comments_by_hash ON comments(block_hash);
 CREATE INDEX idx_comments_by_user ON comments(user_id);
 CREATE INDEX idx_comments_parent ON comments(parent_comment_id);
+CREATE INDEX idx_comments_root_id ON comments(root_id);
+CREATE INDEX idx_comments_sentence_hash ON comments(sentence_hash);
 
 -- 相似块表 (模糊匹配)
 CREATE TABLE IF NOT EXISTS similar_blocks (

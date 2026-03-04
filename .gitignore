@@ -33,3 +33,6 @@ Thumbs.db
 
 # 测试覆盖率
 coverage/
+
+# 数据库 / 缓存持久化数据
+volumes/

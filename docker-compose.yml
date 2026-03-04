@@ -14,7 +14,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./volumes/postgres/data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d collab_comments"]
@@ -31,7 +31,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redisdata:/data
+      - ./volumes/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "--pass", "${REDIS_PASSWORD:-CollabDev2026!}", "ping"]
       interval: 10s
@@ -47,7 +47,7 @@ services:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - qdrantdata:/qdrant/storage
+      - ./volumes/qdrant:/qdrant/storage
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     healthcheck:
@@ -106,13 +106,7 @@ services:
       - ./packages/worker:/app
       - /app/node_modules
 
-volumes:
-  pgdata:
-    driver: local
-  redisdata:
-    driver: local
-  qdrantdata:
-    driver: local
+
 
 networks:
   default:

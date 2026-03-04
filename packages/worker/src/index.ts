@@ -59,14 +59,14 @@ const fingerprintWorker = new Worker(
       for (let start = 0; start < uniqueBlocks.length; start += BATCH) {
         const batch = uniqueBlocks.slice(start, start + BATCH);
         const placeholders = batch.map((_: unknown, j: number) => {
-          const b = j * 5;
-          return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5})`;
+          const b = j * 4;
+          return `($${b+1},$${b+2},$${b+3},$${b+4})`;
         }).join(',');
         const values = batch.flatMap((b) =>
-          [b.hash, b.content, b.content, b.content.length, b.simHash]
+          [b.hash, b.content, b.content.length, b.simHash]
         );
         await pool.query(
-          `INSERT INTO content_blocks (block_hash, raw_content, normalized_content, word_count, similarity_hash)
+          `INSERT INTO content_blocks (block_hash, raw_content, word_count, similarity_hash)
            VALUES ${placeholders}
            ON CONFLICT (block_hash) DO UPDATE SET occurrence_count = content_blocks.occurrence_count + 1, updated_at = NOW()`,
           values
@@ -90,9 +90,9 @@ const fingerprintWorker = new Worker(
         );
       }
 
-      // 更新文档状态
+      // 更新文档状态，清空 content 节省存储
       await pool.query(
-        'UPDATE documents SET word_count = $1, block_count = $2, status = $3 WHERE id = $4',
+        'UPDATE documents SET word_count = $1, block_count = $2, status = $3, content = NULL WHERE id = $4',
         [content.length, blocks.length, 'ready', documentId]
       );
 

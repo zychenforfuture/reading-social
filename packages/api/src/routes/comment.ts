@@ -1,7 +1,27 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
+
+/** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
+function normalizeSentence(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, '')           // 所有空白（含全角空格）
+    .replace(/[\u3000-\u303f\uff00-\uffef]/g, c => {
+      // 全角字母/数字转半角（range FF01-FF5E 对应 21-7E）
+      const cp = c.codePointAt(0)!;
+      return cp >= 0xff01 && cp <= 0xff5e ? String.fromCodePoint(cp - 0xfee0) : c;
+    })
+    // 去掉所有标点符号（中英文）
+    .replace(/[^\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af\w]/g, '');
+}
+
+/** MD5 of normalized sentence — used for cross-document comment sharing */
+function sentenceHash(text: string): string {
+  return createHash('md5').update(normalizeSentence(text)).digest('hex');
+}
 
 const router: Router = Router();
 
@@ -30,6 +50,20 @@ const router: Router = Router();
         WHERE r.root_id = c.id AND r.is_deleted = false
       )
       WHERE c.root_id IS NULL
+    `);
+    // selected_text + sentence_hash（跨文档评论共享）
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)`);
+    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS sentence_hash VARCHAR(64)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_sentence_hash ON comments(sentence_hash)`);
+    // 回填已有评论的 sentence_hash（用归一化后的内容，覆盖之前未归一化的旧值）
+    await pool.query(`
+      UPDATE comments SET sentence_hash = md5(
+        regexp_replace(
+          regexp_replace(trim(selected_text), '[\\s\\u3000]+', '', 'g'),
+          '[^\\u4e00-\\u9fa5\\u3040-\\u30ff\\uac00-\\ud7af\\w]', '', 'g'
+        )
+      )
+      WHERE selected_text IS NOT NULL
     `);
     logger.info('comment_likes migration OK');
   } catch (err) {
@@ -182,9 +216,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     const userId = await getUserId(req);
 
-    // 确保列存在（兼容旧数据库）
-    await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)`).catch(() => {});
-
     if (rootId) {
       // ───── 回复模式 ─────
       const client = await pool.connect();
@@ -250,11 +281,12 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'blockHash is required for root comments' });
     }
 
+    const sHash = selectedText ? sentenceHash(selectedText) : null;
     const result = await pool.query(
-      `INSERT INTO comments (block_hash, user_id, content, selected_text)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, block_hash, user_id, content, selected_text, reply_count, created_at`,
-      [blockHash, userId, content, selectedText || null]
+      `INSERT INTO comments (block_hash, user_id, content, selected_text, sentence_hash)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, block_hash, user_id, content, selected_text, sentence_hash, reply_count, created_at`,
+      [blockHash, userId, content, selectedText || null, sHash]
     );
 
     const comment = result.rows[0];

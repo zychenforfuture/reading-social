@@ -33,13 +33,38 @@ async function runMigration() {
       );
       CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);
     `);
-    logger.info('Auth migration: email_verified + email_otps ready');
+    // 将 avatar_url 字段扩展为 TEXT（支持 base64 图片）
+    await pool.query(`
+      ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;
+    `);
+    logger.info('Auth migration: email_verified + email_otps + avatar_url(TEXT) ready');
 
     // 同步管理员状态
     await syncAdminEmails();
+    // 创建初始管理员
+    await createInitialAdmin();
   } catch (err) {
     logger.error('Auth migration error:', err);
   }
+}
+
+// 根据环境变量自动创建初始管理员账号
+async function createInitialAdmin() {
+  const email = process.env.ADMIN_INIT_EMAIL?.trim();
+  const username = process.env.ADMIN_INIT_USERNAME?.trim();
+  const password = process.env.ADMIN_INIT_PASSWORD?.trim();
+
+  if (!email || !username || !password) return;
+
+  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+  if (existing.rows.length > 0) return; // 已存在，跳过
+
+  await pool.query(
+    `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
+     VALUES ($1, $2, $3, true, true)`,
+    [email, username, `$hashed$${password}`]
+  );
+  logger.info(`Initial admin created: ${email} (${username})`);
 }
 
 // 从环境变量同步管理员邮箱列表
@@ -251,7 +276,7 @@ router.post('/login', async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
     const result = await pool.query(
-      'SELECT id, email, username, password_hash, is_admin, email_verified FROM users WHERE email = $1',
+      'SELECT id, email, username, password_hash, avatar_url, is_admin, email_verified FROM users WHERE email = $1',
       [email]
     );
 
@@ -280,6 +305,7 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         username: user.username,
+        avatar_url: user.avatar_url ?? null,
         is_admin: user.is_admin ?? false,
       },
     });
@@ -294,14 +320,73 @@ router.post('/login', async (req, res) => {
 
 // 获取当前用户
 router.get('/me', async (req, res) => {
-  // TODO: 添加 JWT 验证中间件
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  if (!authHeader?.startsWith('Bearer dummy_token_')) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  const userId = authHeader.replace('Bearer dummy_token_', '');
+  try {
+    const result = await pool.query(
+      'SELECT id, email, username, avatar_url, is_admin FROM users WHERE id = $1',
+      [userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
-  // TODO: 解析 JWT 获取用户 ID
-  res.json({ user: { id: 'dummy', email: 'demo@example.com', username: 'Demo' } });
+// 更新头像
+router.put('/profile', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer dummy_token_')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = authHeader.replace('Bearer dummy_token_', '');
+  try {
+    const { avatar_url } = z.object({ avatar_url: z.string().max(500000) }).parse(req.body);
+    const result = await pool.query(
+      'UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, username, avatar_url, is_admin',
+      [avatar_url, userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed' });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 修改密码（需验证旧密码）
+router.put('/change-password', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer dummy_token_')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = authHeader.replace('Bearer dummy_token_', '');
+  try {
+    const { oldPassword, newPassword } = z.object({
+      oldPassword: z.string().min(1),
+      newPassword: z.string().min(6),
+    }).parse(req.body);
+
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    if (!result.rows[0].password_hash.endsWith(oldPassword)) {
+      return res.status(400).json({ error: '原密码错误' });
+    }
+
+    await pool.query(
+      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [`$hashed$${newPassword}`, userId]
+    );
+    res.json({ message: '密码修改成功' });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed' });
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export { router as authRoutes };

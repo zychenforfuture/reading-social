@@ -27,12 +27,31 @@ export default function Layout() {
               <Link to="/" className="transition-colors hover:text-foreground/80 text-foreground/60">
                 文档列表
               </Link>
+              <Link to="/profile" className="transition-colors hover:text-foreground/80 text-foreground/60">
+                个人中心
+              </Link>
             </nav>
           </div>
           <div className="flex flex-1 items-center justify-end space-x-2">
             {isAuthenticated ? (
               <>
-                <span className="text-sm text-muted-foreground mr-4">{user?.username}</span>
+                <Link
+                  to="/profile"
+                  title={user?.username}
+                  className="flex items-center justify-center rounded-full hover:ring-2 hover:ring-teal-400 transition-all"
+                >
+                  {user?.avatar_url ? (
+                    <img
+                      src={user.avatar_url}
+                      alt={user.username}
+                      className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-teal-500 text-white flex items-center justify-center text-sm font-bold">
+                      {(user?.username || '?')[0].toUpperCase()}
+                    </div>
+                  )}
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-muted h-9 px-4 py-2"
@@ -66,6 +85,11 @@ export default function Layout() {
             <Link to="/" className="block text-sm font-medium">
               文档列表
             </Link>
+            {isAuthenticated && (
+              <Link to="/profile" className="block text-sm font-medium">
+                个人中心
+              </Link>
+            )}
           </nav>
         </div>
       )}
