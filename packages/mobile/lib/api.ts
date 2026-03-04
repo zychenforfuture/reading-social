@@ -100,14 +100,29 @@ export const documents = {
   },
 };
 
+// 匹配中文章节/回/节/卷 标题，支持汉字数字和阿拉伯数字
+const CH_CHAPTER_RE = /^[\s\u3000]*第[零一二三四五六七八九十百千\d]+[章回节卷篇集部][\s\u3000\S]{0,30}$/;
+// 匹配 Markdown 标题
+const MD_HEADING_RE = /^(#{1,6})\s/;
+// 常见标题括号包裹：【标题】《标题》（标题）
+const BRACKET_TITLE_RE = /^[【《（〔\[].{1,20}[】》）〕\]]$/;
+
 function detectBlockType(content: string): string {
-  if (/^#{1,6}\s/.test(content)) return 'heading';
+  const trimmed = content.trim();
+  if (MD_HEADING_RE.test(trimmed)) return 'heading';
+  if (CH_CHAPTER_RE.test(trimmed)) return 'heading';
+  if (BRACKET_TITLE_RE.test(trimmed)) return 'heading';
   return 'paragraph';
 }
 
 function getHeadingLevel(content: string): number | undefined {
-  const m = content.match(/^(#{1,6})\s/);
-  return m ? m[1].length : undefined;
+  const trimmed = content.trim();
+  const mdMatch = trimmed.match(MD_HEADING_RE);
+  if (mdMatch) return mdMatch[1].length;
+  if (/^[\s\u3000]*第[零一二三四五六七八九十百千\d]+[章回卷篇集部]/.test(trimmed)) return 1;
+  if (/^[\s\u3000]*第[零一二三四五六七八九十百千\d]+[节]/.test(trimmed)) return 2;
+  if (BRACKET_TITLE_RE.test(trimmed)) return 2;
+  return 2; // 短标题默认 level 2
 }
 
 // Comments
