@@ -75,11 +75,15 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
               >
                 <p
                   className={[
-                    'text-center font-bold text-gray-900 break-words',
+                    'text-center font-bold text-gray-900 break-words cursor-pointer rounded transition-colors hover:bg-orange-50',
                     isChapterHeading ? 'text-xl tracking-widest' : 'text-base tracking-wide',
-                    totalCount > 0 ? 'bg-amber-50 px-2 rounded' : '',
+                    totalCount > 0 ? 'bg-amber-50 px-2' : '',
                   ].join(' ')}
                   style={{ lineHeight: '2.2' }}
+                  onClick={() => {
+                    if (window.getSelection()?.toString().trim()) return;
+                    onSelectBlock(block.block_hash, firstLine);
+                  }}
                 >
                   {firstLine}
                   {lineCommentIds[0]?.length > 0 && (
