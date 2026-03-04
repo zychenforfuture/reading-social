@@ -246,27 +246,23 @@ export default function DocumentPage() {
           headingOffsets.current[block.hash] = e.nativeEvent.layout.y;
         } : undefined}
       >
-        <View style={styles.blockInner}>
-          <Text
-            style={[
-              styles.blockText,
-              {
-                fontSize,
-                fontWeight: isHeading ? '700' : '400',
-                lineHeight: isHeading ? fontSize * 1.5 : fontSize * 1.85,
-                textAlign: isHeading && headingLevel <= 2 ? 'center' : 'left',
-              },
-            ]}
-          >
-            {!isHeading && <Text style={{ color: 'transparent' }}>{'　　'}</Text>}
-            {displayContent}
-          </Text>
+        <Text
+          style={[
+            styles.blockText,
+            {
+              fontSize,
+              fontWeight: isHeading ? '700' : '400',
+              lineHeight: isHeading ? fontSize * 1.5 : fontSize * 1.85,
+              textAlign: isHeading && headingLevel <= 2 ? 'center' : 'left',
+            },
+          ]}
+        >
+          {!isHeading && <Text style={{ color: 'transparent' }}>{'　　'}</Text>}
+          {displayContent}
           {commentCount > 0 && (
-            <View style={[styles.countBadge, isHeading && styles.countBadgeHeading]}>
-              <Text style={styles.countBadgeText}>{commentCount}</Text>
-            </View>
+            <Text style={styles.inlineBadge}>{` ${commentCount}`}</Text>
           )}
-        </View>
+        </Text>
       </TouchableOpacity>
     );
   };
@@ -612,21 +608,9 @@ const styles = StyleSheet.create({
   // Block
   block: { marginBottom: 0, paddingVertical: 4 },
   headingBlock: { marginTop: 14, marginBottom: 2 },
-  blockInner: { flexDirection: 'row', alignItems: 'flex-start' },
-  blockText: { color: '#1a1a1a', flex: 1 },
-  countBadge: {
-    marginLeft: 6,
-    marginTop: 8,
-    minWidth: 24,
-    height: 20,
-    borderRadius: 4,
-    backgroundColor: '#e8e8e8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 5,
-  },
-  countBadgeHeading: { marginTop: 5 },
-  countBadgeText: { fontSize: 11, color: '#999', fontWeight: '500' },
+  blockText: { color: '#1a1a1a' },
+  // 末尾内联评论数气泡
+  inlineBadge: { fontSize: 11, color: '#bbb', fontWeight: '600' },
 
   // 分页加载提示
   loadMoreIndicator: {
