@@ -258,7 +258,7 @@ export function ReplySection({
                   {/* 删除（自己或管理员） */}
                   {(currentUser?.is_admin || reply.user_id === currentUser?.id) && (
                     <button
-                      onClick={() => deleteMutation.mutate(reply.id)}
+                      onClick={() => window.confirm('确认删除这条评论？') && deleteMutation.mutate(reply.id)}
                       className="text-xs text-muted-foreground hover:text-destructive opacity-0 group-hover/reply:opacity-100 transition-colors"
                     >
                       删除
@@ -520,7 +520,7 @@ export default function CommentPanel({
                       </button>
                       {(user?.is_admin || comment.user_id === user?.id) && (
                         <button
-                          onClick={() => deleteMutation.mutate(comment.id)}
+                          onClick={() => window.confirm('确认删除这条评论？') && deleteMutation.mutate(comment.id)}
                           className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
                         >
                           删除
@@ -587,7 +587,7 @@ export default function CommentPanel({
                               </button>
                               {(user?.is_admin || comment.user_id === user?.id) && (
                                 <button
-                                  onClick={() => deleteMutation.mutate(comment.id)}
+                                  onClick={() => window.confirm('确认删除这条评论？') && deleteMutation.mutate(comment.id)}
                                   className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
                                 >
                                   删除
