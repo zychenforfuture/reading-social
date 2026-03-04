@@ -1,12 +1,20 @@
 import { useRef } from 'react';
 import { type ContentBlock, type Comment } from '../lib/utils';
 
+export interface ReadingStyle {
+  fontSize: number;    // px, e.g. 17
+  lineHeight: number;  // e.g. 2.0
+  bgColor: string;     // e.g. '#ffffff'
+  textColor: string;   // e.g. '#1a1a1a'
+}
+
 interface EditorProps {
   content: ContentBlock[];
   blockCommentCount: Record<string, number>;
   comments: Comment[];
   onSelectBlock: (blockHash: string, selectedText: string) => void;
   onClickCommentBubble: (commentIds: string[], block: { hash: string; text: string }) => void;
+  readingStyle?: ReadingStyle;
 }
 
 // 章节标题识别正则
@@ -17,14 +25,23 @@ const isHeadingLine = (line: string) => {
   return t.length > 0 && (CHAPTER_RE.test(t) || (t.length <= 25 && !/[，。！？；：""''、]{2,}/.test(t) && /^[\u4e00-\u9fa5a-zA-Z0-9\s·《》【】（）\-—]+$/.test(t)));
 };
 
-export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble }: EditorProps) {
+export default function Editor({ content, blockCommentCount, comments, onSelectBlock, onClickCommentBubble, readingStyle }: EditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const fontSize = readingStyle?.fontSize ?? 17;
+  const lineHeight = readingStyle?.lineHeight ?? 2.0;
+  const bgColor = readingStyle?.bgColor ?? '#ffffff';
+  const textColor = readingStyle?.textColor ?? '#1a1a1a';
 
   return (
     <div
       ref={containerRef}
-      className="relative bg-white rounded-2xl shadow-sm"
-      style={{ fontFamily: '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", "Source Han Sans CN", sans-serif' }}
+      className="relative rounded-2xl shadow-sm transition-colors duration-300"
+      style={{
+        backgroundColor: bgColor,
+        color: textColor,
+        fontFamily: '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", "Source Han Sans CN", sans-serif',
+      }}
     >
       {/* 顶部提示 */}
       <div className="flex justify-end px-8 pt-5 pb-0">
@@ -79,7 +96,7 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
                     isChapterHeading ? 'text-xl tracking-widest' : 'text-base tracking-wide',
                     totalCount > 0 ? 'bg-amber-50 px-2' : '',
                   ].join(' ')}
-                  style={{ lineHeight: '2.2' }}
+                  style={{ lineHeight: `${lineHeight + 0.2}`, color: textColor }}
                   onClick={() => {
                     if (window.getSelection()?.toString().trim()) return;
                     onSelectBlock(block.block_hash, firstLine);
@@ -123,13 +140,14 @@ export default function Editor({ content, blockCommentCount, comments, onSelectB
                 return (
                   <p
                     key={lineIdx}
-                    className="text-gray-800 break-words cursor-pointer rounded transition-colors hover:bg-orange-50/60"
+                    className="break-words cursor-pointer rounded transition-colors hover:bg-orange-50/60"
                     style={{
-                      fontSize: '17px',
-                      lineHeight: '2.0',
+                      fontSize: `${fontSize}px`,
+                      lineHeight: `${lineHeight}`,
                       textIndent: '2em',
                       marginBottom: isDialogue ? '0' : '0.1em',
                       letterSpacing: '0.02em',
+                      color: textColor,
                     }}
                     onClick={() => {
                       if (window.getSelection()?.toString().trim()) return;
