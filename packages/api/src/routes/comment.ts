@@ -246,8 +246,9 @@ router.post('/', async (req: Request, res: Response) => {
 
         const reply = result.rows[0];
         if (userId) {
-          const u = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+          const u = await pool.query('SELECT username, avatar_url FROM users WHERE id = $1', [userId]);
           reply.username = u.rows[0]?.username ?? null;
+          reply.avatar_url = u.rows[0]?.avatar_url ?? null;
         }
         if (replyToUserId) {
           const rtu = await pool.query('SELECT username FROM users WHERE id = $1', [replyToUserId]);
@@ -291,8 +292,9 @@ router.post('/', async (req: Request, res: Response) => {
 
     const comment = result.rows[0];
     if (userId) {
-      const userResult = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+      const userResult = await pool.query('SELECT username, avatar_url FROM users WHERE id = $1', [userId]);
       comment.username = userResult.rows[0]?.username ?? null;
+      comment.avatar_url = userResult.rows[0]?.avatar_url ?? null;
     }
 
     logger.info(`Comment created: ${comment.id} on block ${blockHash.substring(0, 8)}...`);
