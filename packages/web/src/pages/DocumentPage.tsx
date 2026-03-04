@@ -513,7 +513,9 @@ export default function DocumentPage() {
   }
 
   return (
-    <div className="space-y-4 pb-6 max-w-[740px] mx-auto">
+    <div className="mx-auto max-w-[1080px] flex items-start">
+      {/* 阅读内容列 */}
+      <div className="flex-1 min-w-0 max-w-[740px] space-y-4 pb-6">
       {/* 后台继续加载，不显示进度提示 */}
       {/* 标题行 */}
       <div className="flex items-center justify-between">
@@ -651,19 +653,6 @@ export default function DocumentPage() {
         }}
       />
 
-      {/* 评论抽屉：只显示当前章节的评论 */}
-      <CommentPanel
-        documentId={id!}
-        comments={allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
-        blockCommentCount={blockCommentCount}
-        selectedBlock={selectedBlock}
-        onClearSelection={() => setSelectedBlock(null)}
-        open={showComments}
-        onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusCommentIds(null); }}
-        focusCommentIds={focusCommentIds}
-        onClearFocus={() => setFocusCommentIds(null)}
-      />
-
       {/* 本章全部评论 */}
       <ChapterComments
         documentId={id!}
@@ -717,6 +706,21 @@ export default function DocumentPage() {
           onClose={() => setShowTOC(false)}
         />
       )}
+      </div>{/* end reading content */}
+
+      {/* 内联评论侧栏：同正文并排，sticky 吸附在右侧 */}
+      <CommentPanel
+        inline
+        documentId={id!}
+        comments={allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
+        blockCommentCount={blockCommentCount}
+        selectedBlock={selectedBlock}
+        onClearSelection={() => setSelectedBlock(null)}
+        open={showComments}
+        onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusCommentIds(null); }}
+        focusCommentIds={focusCommentIds}
+        onClearFocus={() => setFocusCommentIds(null)}
+      />
     </div>
   );
 }

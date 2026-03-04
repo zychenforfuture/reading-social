@@ -14,6 +14,8 @@ interface CommentPanelProps {
   onClose: () => void;
   focusCommentIds?: string[] | null;
   onClearFocus?: () => void;
+  /** 内联侧栏模式：吹附在正文右侧，无遮罩，sticky 定位 */
+  inline?: boolean;
 }
 
 export function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
@@ -297,6 +299,7 @@ export default function CommentPanel({
   onClose,
   focusCommentIds,
   onClearFocus,
+  inline,
 }: CommentPanelProps) {
   const queryClient = useQueryClient();
   const { user } = useUserStore();
@@ -394,19 +397,23 @@ export default function CommentPanel({
 
   return (
     <>
-      {/* 遮罩 */}
-      {open && (
+      {/* 遮罩：仅非 inline 模式显示 */}
+      {open && !inline && (
         <div
           className="fixed inset-0 z-40 bg-black/20"
           onClick={onClose}
         />
       )}
 
-      {/* 抽屉面板 */}
+      {/* 面板：inline 模式为 sticky 侧栏，普通模式为 fixed 左展抽屉 */}
       <div
         className={cn(
-          'fixed top-0 right-0 h-full w-80 bg-white dark:bg-zinc-900 shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out',
-          open ? 'translate-x-0' : 'translate-x-full',
+          inline
+            ? 'sticky top-14 h-[calc(100vh-3.5rem)] flex flex-col border-l bg-background overflow-hidden transition-[width] duration-300'
+            : 'fixed top-0 right-0 h-full bg-white dark:bg-zinc-900 shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out',
+          inline
+            ? (open ? 'w-[300px]' : 'w-0')
+            : (open ? 'translate-x-0 w-80' : 'translate-x-full w-80'),
         )}
       >
         {/* 头部 */}
