@@ -2,7 +2,17 @@
 
 > 评论跟着内容走，而不是跟着文档走
 
-一个面向阅读社群的跨文档协同批注平台。上传文章、为任意段落发表评论、与他人互动点赞回复——当同一段文字出现在多篇文档中时，所有读者的批注都会自动汇聚在一起。
+一个面向阅读社群的跨文档协同批注平台。上传文章、为任意段落发表评论、与他人互动点赞回复。当同一段文字出现在多篇文档中时，读者的讨论可以在内容维度聚合，而不是绑定到单一文档 URL。
+
+## 开发进度（2026-03）
+
+| 模块 | 进度 | 状态说明 |
+|------|------|----------|
+| Web 端（`packages/web`） | 85% | 登录/注册/找回密码、文档上传与阅读、评论回复点赞、目录与阅读设置已可用 |
+| API（`packages/api`） | 75% | OTP、文档处理队列、评论 SSE、跨文档评论聚合已可用；鉴权与密码安全仍在开发态 |
+| Worker（`packages/worker`） | 70% | 文档分块、内容哈希入库、去重复用已可用；向量写入链路待补全 |
+| Mobile（`packages/mobile`） | 55% | 已有登录/注册/阅读/评论/个人中心界面与主流程；部分接口仍在对齐中 |
+| Docker 部署 | 90% | 本地与生产 compose 均可启动，支持 Postgres/Redis/Qdrant/API/Worker/Web |
 
 ## 核心特色
 
@@ -18,17 +28,17 @@
 
 内置阅读样式控制面板，支持字号（15–20 px）、行距（1.6–2.2）以及四种背景主题（纯白 / 羊皮纸 / 护眼绿 / 深色），设置持久化到 `localStorage`，刷新后恢复。
 
-### 语义相似推荐
+### 语义相似推荐（进行中）
 
-后台对每个段落生成向量嵌入，存入 Qdrant。打开任意段落的评论栏时，系统自动找出语义最相近的其他段落并展示其批注，帮助读者发现相关讨论。
+已预留 Qdrant 集合和相似块查询接口，前后端都已接入相似内容展示位。当前向量生成与回写链路仍在完善中。
 
 ### 大文档无感加载
 
-超大文档通过前端 Web Worker 预处理 + BullMQ 异步队列入库，SSE 实时推送进度；阅读时采用 JOIN 分页查询 + TanStack Virtual 虚拟滚动，10 万段落级文档首屏秒开。
+大文档通过前端 Web Worker 预处理 + BullMQ 异步队列入库；阅读端使用分批拉取与章节定位，评论通过 SSE 实时同步。
 
 ---
 
-## 功能清单
+## 功能清单（按当前实现）
 
 | 功能 | 说明 |
 |------|------|
@@ -37,16 +47,23 @@
 | **评论 · 回复 · 点赞** | 多层嵌套，支持引用原文段落，点赞乐观更新 |
 | **内嵌评论侧栏** | sticky 布局，正文与评论并排，不遮挡阅读 |
 | **章节评论汇总** | 文档底部按章节汇总全部批注，可独立浏览 |
-| **语义相似推荐** | Qdrant 向量检索，推荐语义相近段落的批注 |
+| **语义相似推荐（Beta）** | 已有相似块查询接口与 UI，向量生产链路持续完善 |
 | **阅读设置面板** | 字号 / 行距 / 背景主题，localStorage 持久化 |
-| **大文件异步处理** | Web Worker + BullMQ + SSE 进度推送 |
-| **大文档分页加载** | JOIN 分页 + 虚拟滚动，首屏秒开 |
+| **大文件异步处理** | Web Worker + BullMQ 队列处理 |
+| **大文档分批加载** | JOIN 分页查询 + 渐进渲染 |
 | **阅读记忆** | 自动记录最后阅读章节，重开后恢复位置 |
 | **仿书排版** | 首行缩进、章节标题居中加粗、前言自动识别 |
 | **目录章节导航** | 移动端支持 TOC 弹窗，点击章节跳转滚动 |
 | **邮箱 OTP** | 注册与重置密码均通过 6 位验证码，无需点击链接 |
 | **管理员权限** | 管理员可上传文档、查看上传者信息、删除任意评论 |
-| **个人资料** | DiceBear 预设头像或本地图片上传（base64），在线改密码 |
+| **个人资料** | Web 端支持头像更新与修改密码；移动端接口对齐中 |
+
+## 已知限制
+
+- 当前鉴权仍为开发态实现（`dummy_token_*`），生产前需切换为真实 JWT 签发与校验。
+- 当前密码校验仍为开发态逻辑（非 bcrypt），生产前需完成安全哈希与比对。
+- Web 上传目前聚焦 `.txt` 文档流程；更多格式正在统一到服务端解析链路。
+- 移动端部分请求方法与字段仍在对齐，属于 Beta 状态。
 
 ## 技术栈
 
@@ -54,9 +71,7 @@
 - **React 19** + TypeScript + Vite
 - **React Router v7** — 客户端路由
 - **TanStack Query v5** — 服务端状态与乐观更新
-- **TanStack Virtual** — 长列表虚拟滚动
 - **TipTap** — 富文本评论编辑器（Highlight、Placeholder 扩展）
-- **Yjs + y-websocket** — 协同实时同步基础设施
 - **Radix UI** — 无障碍 UI 原语（Dialog、DropdownMenu、Tooltip 等）
 - **Zustand** — 客户端用户状态持久化
 - **Tailwind CSS v4** — 样式
@@ -68,13 +83,13 @@
 - **Redis** + **BullMQ** — 文件处理任务队列
 - **Qdrant** — 段落向量索引与相似搜索
 - **Nodemailer** — 阿里云 SMTP 发送 OTP 邮件
-- **SSE**（Server-Sent Events）— 文件处理进度实时推送
+- **SSE**（Server-Sent Events）— 评论实时推送
 
 ### Worker（`packages/worker`）
-- BullMQ Worker，负责文档解析、段落切割、向量入库
+- BullMQ Worker，负责文档解析、段落切割、内容哈希入库
 
 ### 移动端（`packages/mobile`）
-- **Expo**（React Native）— 移动端应用（开发中）
+- **Expo**（React Native）— 移动端应用（Beta）
 
 ### 基础设施
 - **Docker Compose** — 一键本地 / 生产部署
@@ -89,7 +104,7 @@ reading/
 │   ├── api/        # Express API 服务
 │   ├── web/        # React 19 前端
 │   ├── worker/     # BullMQ 后台工作进程
-│   └── mobile/     # Expo 移动端（开发中）
+│   └── mobile/     # Expo 移动端（Beta）
 ├── docker/
 │   ├── nginx/      # Nginx 配置
 │   └── postgres/   # 数据库初始化 SQL
@@ -106,7 +121,32 @@ reading/
 
 ### 环境要求
 
+- Node.js >= 20
+- pnpm >= 9
 - Docker & Docker Compose
+
+### 本地开发（推荐）
+
+```bash
+# 1) 安装依赖
+pnpm install
+
+# 2) 启动基础设施（Postgres / Redis / Qdrant）
+docker compose up -d postgres redis qdrant
+
+# 3) 分别启动 API / Worker / Web
+pnpm --filter @collab/api dev
+pnpm --filter @collab/worker dev
+pnpm --filter @collab/web dev
+```
+
+移动端（可选）：
+
+```bash
+cd packages/mobile
+npm install
+npm run start
+```
 
 ### 部署
 
@@ -152,6 +192,13 @@ SMTP_FROM=your@domain.com
 | `/` | 文档列表首页 |
 | `/documents/:id` | 文档阅读 & 批注页 |
 | `/profile` | 个人资料（头像设置、修改密码） |
+
+## 后续里程碑
+
+1. 完成 JWT 鉴权与权限中间件替换，移除 `dummy_token`。
+2. 接入密码安全哈希（bcrypt/argon2）与相关迁移。
+3. 打通向量嵌入生产链路（Worker -> Qdrant -> 相似推荐闭环）。
+4. 完成移动端 API 对齐与上传链路统一。
 
 ## 许可证
 

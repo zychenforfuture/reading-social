@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { createHash } from 'crypto';
 import { pool } from './db/database.js';
 import { logger } from './utils/logger.js';
+import { computeSimHash, hammingDistance } from './utils/simhash.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const url = new URL(redisUrl);
@@ -14,6 +15,37 @@ const connection = {
 
 // 文档处理队列
 const documentQueue = new Queue('document-processing', { connection });
+
+/**
+ * 查找与给定 simHash 海明距离 <= threshold 的已有块
+ */
+async function findSimilarBlocks(simHash: string, threshold = 3): Promise<{ block_hash: string; similarity_hash: string }[]> {
+  const result = await pool.query(
+    'SELECT block_hash, similarity_hash FROM content_blocks'
+  );
+
+  const similar: { block_hash: string; similarity_hash: string; distance: number }[] = [];
+
+  for (const row of result.rows) {
+    const distance = hammingDistance(simHash, row.similarity_hash);
+    if (distance <= threshold && distance > 0) {
+      similar.push({
+        block_hash: row.block_hash,
+        similarity_hash: row.similarity_hash,
+        distance,
+      });
+    }
+  }
+
+  return similar;
+}
+
+/**
+ * 计算相似度分数（基于海明距离）
+ */
+function calculateSimilarityScore(distance: number): number {
+  return Number((1 - distance / 64).toFixed(4));
+}
 
 // 内容指纹 Worker
 const fingerprintWorker = new Worker(
@@ -90,6 +122,39 @@ const fingerprintWorker = new Worker(
         );
       }
 
+      // 为新增的块计算相似块关系
+      logger.info(`Calculating similar blocks for document ${documentId}...`);
+      const SIMILAR_THRESHOLD = 3; // 海明距离阈值
+
+      for (const block of uniqueBlocks) {
+        // 查询已有相似块
+        const similar = await findSimilarBlocks(block.simHash, SIMILAR_THRESHOLD);
+
+        if (similar.length > 0) {
+          const values: any[] = [];
+          const placeholders: string[] = [];
+          let paramIndex = 1;
+
+          for (const s of similar) {
+            const score = calculateSimilarityScore(s.distance);
+            placeholders.push(`($${paramIndex},$${paramIndex + 1},$${paramIndex + 2},$${paramIndex + 3})`);
+            values.push(block.hash, s.block_hash, score, 'simhash');
+            values.push(s.block_hash, block.hash, score, 'simhash'); // 双向关系
+            paramIndex += 4;
+          }
+
+          if (placeholders.length > 0) {
+            await pool.query(
+              `INSERT INTO similar_blocks (block_hash, similar_hash, similarity_score, algorithm)
+               VALUES ${placeholders.join(',')}
+               ON CONFLICT (block_hash, similar_hash, algorithm) DO UPDATE SET similarity_score = EXCLUDED.similarity_score`,
+              values
+            );
+            logger.info(`Found ${similar.length} similar blocks for ${block.hash.substring(0, 8)}...`);
+          }
+        }
+      }
+
       // 更新文档状态，清空 content 节省存储
       await pool.query(
         'UPDATE documents SET word_count = $1, block_count = $2, status = $3, content = NULL WHERE id = $4',
@@ -107,7 +172,7 @@ const fingerprintWorker = new Worker(
       throw error;
     }
   },
-  { connection, concurrency: 2 }
+  { connection, concurrency: 1 } // 降低并发，避免相似计算时数据库竞争
 );
 
 fingerprintWorker.on('completed', (job) => {
@@ -117,11 +182,6 @@ fingerprintWorker.on('completed', (job) => {
 fingerprintWorker.on('failed', (job, err) => {
   logger.error(`Job ${job?.id} failed: ${err?.message ?? String(err)}`);
 });
-
-// 计算 SimHash (简化版本)
-function computeSimHash(text: string): string {
-  return createHash('md5').update(text).digest('hex');
-}
 
 // 优雅关闭
 process.on('SIGTERM', async () => {
