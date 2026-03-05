@@ -19,7 +19,10 @@ const documentQueue = new Queue('document-processing', { connection });
 /**
  * 查找与给定 simHash 海明距离 <= threshold 的已有块
  */
-async function findSimilarBlocks(simHash: string, threshold = 3): Promise<{ block_hash: string; similarity_hash: string }[]> {
+async function findSimilarBlocks(
+  simHash: string,
+  threshold = 3,
+): Promise<{ block_hash: string; similarity_hash: string; distance: number }[]> {
   const result = await pool.query(
     'SELECT block_hash, similarity_hash FROM content_blocks'
   );
@@ -137,10 +140,12 @@ const fingerprintWorker = new Worker(
 
           for (const s of similar) {
             const score = calculateSimilarityScore(s.distance);
+            // 双向关系各占一个 VALUES 占位，参数必须与 values 数组严格对齐
             placeholders.push(`($${paramIndex},$${paramIndex + 1},$${paramIndex + 2},$${paramIndex + 3})`);
+            placeholders.push(`($${paramIndex + 4},$${paramIndex + 5},$${paramIndex + 6},$${paramIndex + 7})`);
             values.push(block.hash, s.block_hash, score, 'simhash');
             values.push(s.block_hash, block.hash, score, 'simhash'); // 双向关系
-            paramIndex += 4;
+            paramIndex += 8;
           }
 
           if (placeholders.length > 0) {

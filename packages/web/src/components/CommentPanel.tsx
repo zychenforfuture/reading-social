@@ -61,10 +61,16 @@ export function ReplySection({
   comment,
   documentId,
   currentUser,
+  onLikeRoot,
+  onDeleteRoot,
+  canDeleteRoot,
 }: {
   comment: Comment;
   documentId: string;
   currentUser: { id: string; username?: string; is_admin?: boolean } | null;
+  onLikeRoot: () => void;
+  onDeleteRoot: () => void;
+  canDeleteRoot: boolean;
 }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
@@ -158,8 +164,18 @@ export function ReplySection({
 
   return (
     <div className="mt-1.5">
-      {/* 操作行：回复按钮 + 展开按钮 */}
-      <div className="flex items-center gap-3">
+      {/* 操作行：点赞/回复/删除 同一行，附带展开回复 */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={onLikeRoot}
+          className={cn(
+            'flex items-center gap-1 text-xs transition-colors',
+            comment.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
+          {comment.like_count > 0 && <span>{comment.like_count}</span>}
+        </button>
         <button
           onClick={() => {
             setReplyingTo(null);
@@ -171,6 +187,14 @@ export function ReplySection({
           <CornerDownRight className="h-3 w-3" />
           回复
         </button>
+        {canDeleteRoot && (
+          <button
+            onClick={onDeleteRoot}
+            className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          >
+            删除
+          </button>
+        )}
         {replyCount > 0 && (
           <button
             onClick={() => setExpanded(!expanded)}
@@ -514,27 +538,18 @@ export default function CommentPanel({
                     <p className="text-sm text-foreground leading-relaxed break-words">
                       {comment.content}
                     </p>
-                    <div className="flex items-center gap-3 mt-2">
-                      <button
-                        onClick={() => likeMutation.mutate(comment.id)}
-                        className={cn(
-                          'flex items-center gap-1 text-xs transition-colors',
-                          comment.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
-                        )}
-                      >
-                        <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
-                        {comment.like_count > 0 && <span>{comment.like_count}</span>}
-                      </button>
-                      {(user?.is_admin || comment.user_id === user?.id) && (
-                        <button
-                          onClick={() => window.confirm('确认删除这条评论？') && deleteMutation.mutate(comment.id)}
-                          className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          删除
-                        </button>
-                      )}
-                    </div>
-                    <ReplySection comment={comment} documentId={documentId} currentUser={user} />
+                    <ReplySection
+                      comment={comment}
+                      documentId={documentId}
+                      currentUser={user}
+                      onLikeRoot={() => likeMutation.mutate(comment.id)}
+                      onDeleteRoot={() => {
+                        if (window.confirm('确认删除这条评论？')) {
+                          deleteMutation.mutate(comment.id);
+                        }
+                      }}
+                      canDeleteRoot={Boolean(user?.is_admin || comment.user_id === user?.id)}
+                    />
                   </div>
                 </div>
               </div>
@@ -581,27 +596,18 @@ export default function CommentPanel({
                             <p className="text-sm text-foreground leading-relaxed break-words">
                               {comment.content}
                             </p>
-                            <div className="flex items-center gap-3 mt-1.5">
-                              <button
-                                onClick={() => likeMutation.mutate(comment.id)}
-                                className={cn(
-                                  'flex items-center gap-1 text-xs transition-colors',
-                                  comment.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
-                                )}
-                              >
-                                <ThumbsUp className={cn('h-3 w-3', comment.liked_by_me && 'fill-current')} />
-                                {comment.like_count > 0 && <span>{comment.like_count}</span>}
-                              </button>
-                              {(user?.is_admin || comment.user_id === user?.id) && (
-                                <button
-                                  onClick={() => window.confirm('确认删除这条评论？') && deleteMutation.mutate(comment.id)}
-                                  className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                                >
-                                  删除
-                                </button>
-                              )}
-                            </div>
-                            <ReplySection comment={comment} documentId={documentId} currentUser={user} />
+                            <ReplySection
+                              comment={comment}
+                              documentId={documentId}
+                              currentUser={user}
+                              onLikeRoot={() => likeMutation.mutate(comment.id)}
+                              onDeleteRoot={() => {
+                                if (window.confirm('确认删除这条评论？')) {
+                                  deleteMutation.mutate(comment.id);
+                                }
+                              }}
+                              canDeleteRoot={Boolean(user?.is_admin || comment.user_id === user?.id)}
+                            />
                           </div>
                         </div>
                       </div>

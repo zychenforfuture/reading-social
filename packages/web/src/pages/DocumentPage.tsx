@@ -230,27 +230,18 @@ function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock }:
                         <span className="text-xs text-muted-foreground shrink-0">{timeAgo(c.created_at)}</span>
                       </div>
                       <p className="text-sm text-foreground leading-relaxed break-words">{c.content}</p>
-                      <div className="flex items-center gap-3 mt-2">
-                        <button
-                          onClick={() => likeMutation.mutate(c.id)}
-                          className={cn(
-                            'flex items-center gap-1 text-xs transition-colors',
-                            c.liked_by_me ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground'
-                          )}
-                        >
-                          <ThumbsUp className={cn('h-3 w-3', c.liked_by_me && 'fill-current')} />
-                          {c.like_count > 0 && <span>{c.like_count}</span>}
-                        </button>
-                        {(user?.is_admin || c.user_id === user?.id) && (
-                          <button
-                            onClick={() => deleteMutation.mutate(c.id)}
-                            className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                          >
-                            删除
-                          </button>
-                        )}
-                      </div>
-                      <ReplySection comment={c} documentId={documentId} currentUser={user} />
+                      <ReplySection
+                        comment={c}
+                        documentId={documentId}
+                        currentUser={user}
+                        onLikeRoot={() => likeMutation.mutate(c.id)}
+                        onDeleteRoot={() => {
+                          if (window.confirm('确认删除这条评论？')) {
+                            deleteMutation.mutate(c.id);
+                          }
+                        }}
+                        canDeleteRoot={Boolean(user?.is_admin || c.user_id === user?.id)}
+                      />
                     </div>
                   </div>
                 </div>
