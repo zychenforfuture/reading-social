@@ -527,7 +527,10 @@ export default function DocumentPage() {
             </button>
           )}
           <button
-            onClick={() => setShowComments(v => !v)}
+            onClick={() => {
+              setShowComments(true);
+              setSelectedBlock(null);
+            }}
             className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground relative"
           >
             <MessageSquare className="h-4 w-4" />
