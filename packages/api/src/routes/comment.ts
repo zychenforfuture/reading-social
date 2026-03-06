@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
+import { authenticate, optionalAuth } from '../middleware/auth.js';
 
 /** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
 function normalizeSentence(text: string): string {
@@ -26,7 +27,7 @@ function sentenceHash(text: string): string {
 const router: Router = Router();
 
 // ─── DB 迁移（首次启动自动执行）────────────────────────────────────
-;(async () => {
+(async () => {
   try {
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS like_count INTEGER NOT NULL DEFAULT 0`);
     await pool.query(`
@@ -99,19 +100,6 @@ function broadcastToDocument(documentId: string, data: object): void {
 }
 // ────────────────────────────────────────────────────────────────
 
-// 从 Authorization header 解析当前用户 ID
-async function getUserId(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer dummy_token_')) return null;
-  const userId = auth.replace('Bearer dummy_token_', '');
-  try {
-    const r = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
-    return r.rows.length > 0 ? userId : null;
-  } catch {
-    return null;
-  }
-}
-
 const commentSchema = z.object({
   content: z.string().min(1).max(5000),
   blockHash: z.string().length(64).optional(), // 根评论必填
@@ -151,10 +139,10 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
 });
 
 // 获取根评论下的所有回复（二级扁平）
-router.get('/:id/replies', async (req, res) => {
+router.get('/:id/replies', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = await getUserId(req); // 可为 null
+    const userId = req.user?.userId || null;
     const result = await pool.query(
       `SELECT c.*, u.username, u.avatar_url,
               ru.username as reply_to_username,
@@ -165,7 +153,7 @@ router.get('/:id/replies', async (req, res) => {
        LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $2
        WHERE c.root_id = $1 AND c.is_deleted = false
        ORDER BY c.created_at ASC`,
-      [id, userId ?? null]
+      [id, userId]
     );
     res.json({ replies: result.rows });
   } catch (error) {
@@ -175,7 +163,7 @@ router.get('/:id/replies', async (req, res) => {
 });
 
 // 获取某内容块的所有评论
-router.get('/block/:hash', async (req, res) => {
+router.get('/block/:hash', optionalAuth, async (req, res) => {
   try {
     const { hash } = req.params;
 
@@ -210,11 +198,11 @@ router.get('/block/:hash', async (req, res) => {
 });
 
 // 创建评论（根评论或回复）
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', authenticate, async (req: Request, res: Response) => {
   try {
     const { content, blockHash, rootId, replyToUserId, selectedText } = commentSchema.parse(req.body);
 
-    const userId = await getUserId(req);
+    const { userId } = req.user!;
 
     if (rootId) {
       // ───── 回复模式 ─────
@@ -320,13 +308,25 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // 更新评论
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const { content, isResolved } = z.object({
       content: z.string().min(1).max(5000).optional(),
       isResolved: z.boolean().optional(),
     }).parse(req.body);
+
+    const { userId, isAdmin } = req.user!;
+
+    // 检查评论归属或管理员权限
+    const commentResult = await pool.query('SELECT user_id FROM comments WHERE id = $1 AND is_deleted = false', [id]);
+    if (commentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    if (!isAdmin && commentResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Cannot update other users\' comments' });
+    }
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -354,10 +354,6 @@ router.patch('/:id', async (req, res) => {
       values
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Comment not found' });
-    }
-
     res.json({ comment: result.rows[0] });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -369,26 +365,19 @@ router.patch('/:id', async (req, res) => {
 });
 
 // 删除评论 (软删除) — 只能删自己的，管理员可删所有
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const userId = await getUserId(req);
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const { userId, isAdmin } = req.user!;
 
-    // 查评论归属 + 当前用户是否管理员
-    const [commentRow, userRow] = await Promise.all([
-      pool.query('SELECT user_id, root_id FROM comments WHERE id = $1 AND is_deleted = false', [id]),
-      pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]),
-    ]);
+    // 查评论归属
+    const commentRow = await pool.query('SELECT user_id, root_id FROM comments WHERE id = $1 AND is_deleted = false', [id]);
 
     if (commentRow.rows.length === 0) {
       return res.status(404).json({ error: 'Comment not found' });
     }
 
-    const isAdmin = userRow.rows[0]?.is_admin === true;
     const commentOwnerId = commentRow.rows[0].user_id;
     const rootId: string | null = commentRow.rows[0].root_id;
 
@@ -427,11 +416,10 @@ router.delete('/:id', async (req, res) => {
 });
 
 // 点赞 / 取消点赞（toggle）
-router.post('/:id/like', async (req: Request, res: Response) => {
+router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = await getUserId(req);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { userId } = req.user!;
 
     const client = await pool.connect();
     try {

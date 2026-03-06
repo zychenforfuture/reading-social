@@ -4,8 +4,9 @@ import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { documentQueue } from '../config/queue.js';
+import { authenticate, optionalAuth } from '../middleware/auth.js';
 
-/** 与 comment.ts 保持一致的归一化：去掉空白+标点，只保留纯文字 */
+/** 与 comment.ts 保持一致的归一化：去掉空白 + 标点，只保留纯文字 */
 function normalizeLine(text: string): string {
   return text
     .trim()
@@ -25,26 +26,10 @@ const uploadSchema = z.object({
   content: z.string(),
 });
 
-// 从 Authorization header 解析当前登录用户信息
-async function getCallerInfo(req: Request): Promise<{ userId: string | null; isAdmin: boolean }> {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer dummy_token_')) {
-    return { userId: null, isAdmin: false };
-  }
-  const userId = auth.replace('Bearer dummy_token_', '');
-  try {
-    const r = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
-    if (r.rows.length === 0) return { userId: null, isAdmin: false };
-    return { userId, isAdmin: r.rows[0].is_admin === true };
-  } catch {
-    return { userId: null, isAdmin: false };
-  }
-}
-
 // 列出用户文档
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const { userId, isAdmin } = await getCallerInfo(req);
+    const { userId, isAdmin } = req.user!;
 
     let result;
     if (isAdmin) {
@@ -56,7 +41,7 @@ router.get('/', async (req: Request, res: Response) => {
          LEFT JOIN users u ON d.user_id = u.id
          ORDER BY d.created_at DESC`
       );
-    } else if (userId) {
+    } else {
       // 普通用户只看自己的
       result = await pool.query(
         `SELECT d.id, d.title, d.word_count, d.block_count, d.status, d.created_at, d.updated_at,
@@ -67,8 +52,6 @@ router.get('/', async (req: Request, res: Response) => {
          ORDER BY d.created_at DESC`,
         [userId]
       );
-    } else {
-      return res.status(401).json({ error: 'Unauthorized' });
     }
 
     res.json({ documents: result.rows });
@@ -137,7 +120,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // 获取文档评论分布
-router.get('/:id/comments', async (req, res) => {
+router.get('/:id/comments', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -171,8 +154,8 @@ router.get('/:id/comments', async (req, res) => {
     const lineHashes = Array.from(lineHashToBlockHash.keys());
 
     // 获取这些块的所有评论，同时匹配 sentence_hash（跨文档共享评论）
-    // 热度排序公式：(3×reply_count + like_count) × e^(-0.05×小时数) + 冷启动加成(2小时内+1.5)
-    const { userId } = await getCallerInfo(req);
+    // 热度排序公式：(3×reply_count + like_count) × e^(-0.05×小时数) + 冷启动加成 (2 小时内 +1.5)
+    const userId = req.user?.userId || null;
     const commentsResult = await pool.query(
       `SELECT c.*, u.username, u.avatar_url,
               c.like_count,
@@ -181,6 +164,7 @@ router.get('/:id/comments', async (req, res) => {
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
        LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $3
+       LEFT JOIN comments root ON c.root_id = root.id
        WHERE (c.block_hash = ANY($1) OR (c.sentence_hash IS NOT NULL AND c.sentence_hash = ANY($2)))
          AND c.root_id IS NULL AND c.is_deleted = false
        ORDER BY (
@@ -217,15 +201,11 @@ router.get('/:id/comments', async (req, res) => {
 });
 
 // 上传/创建文档
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', authenticate, async (req: Request, res: Response) => {
   try {
     const { title, content } = uploadSchema.parse(req.body);
 
-    // 从 Authorization header 获取用户 ID
-    const { userId } = await getCallerInfo(req);
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const { userId } = req.user!;
 
     // 计算文件哈希 (用于秒传)
     const crypto = await import('crypto');
@@ -305,13 +285,24 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // 删除文档
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    const { userId, isAdmin } = req.user!;
+
+    // 检查文档归属或管理员权限
+    const docResult = await pool.query('SELECT user_id FROM documents WHERE id = $1', [id]);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    if (!isAdmin && docResult.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Cannot delete other users\' documents' });
+    }
 
     await pool.query('DELETE FROM documents WHERE id = $1', [id]);
 
-    logger.info(`Document deleted: ${id}`);
+    logger.info(`Document deleted: ${id} by user ${userId}`);
     res.json({ message: 'Document deleted' });
   } catch (error) {
     logger.error('Delete document error:', error);

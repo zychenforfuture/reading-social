@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { sendOTPEmail } from '../utils/email.js';
+import { generateToken, authenticate } from '../middleware/auth.js';
 
 const router: Router = Router();
+
+const SALT_ROUNDS = 10;
 
 // 启动时执行迁移，添加邮箱验证字段及 OTP 表
 async function runMigration() {
@@ -59,10 +63,12 @@ async function createInitialAdmin() {
   const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
   if (existing.rows.length > 0) return; // 已存在，跳过
 
+  // ✅ 使用 bcrypt 哈希管理员密码
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   await pool.query(
     `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
      VALUES ($1, $2, $3, true, true)`,
-    [email, username, `$hashed$${password}`]
+    [email, username, passwordHash]
   );
   logger.info(`Initial admin created: ${email} (${username})`);
 }
@@ -198,19 +204,22 @@ router.post('/register', async (req, res) => {
       .filter(Boolean);
     const isAdmin = adminEmails.includes(email.toLowerCase());
 
+    // ✅ 使用 bcrypt 哈希密码
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
     if (existing.rows.length > 0) {
       // 已存在未验证的用户，更新并标记验证
       await pool.query(
         `UPDATE users SET username = $1, password_hash = $2, email_verified = true,
          is_admin = $4, verification_token = NULL, verification_token_expires = NULL
          WHERE email = $3`,
-        [username, `$hashed$${password}`, email, isAdmin]
+        [username, passwordHash, email, isAdmin]
       );
     } else {
       await pool.query(
         `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
          VALUES ($1, $2, $3, true, $4)`,
-        [email, username, `$hashed$${password}`, isAdmin]
+        [email, username, passwordHash, isAdmin]
       );
     }
 
@@ -254,10 +263,10 @@ router.post('/reset-password', async (req, res) => {
     }
 
     await pool.query('DELETE FROM email_otps WHERE email = $1 AND purpose = $2', [email, 'reset_password']);
-    await pool.query(
-      'UPDATE users SET password_hash = $1 WHERE email = $2',
-      [`$hashed$${password}`, email]
-    );
+    
+    // ✅ 使用 bcrypt 哈希新密码
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2', [passwordHash, email]);
 
     logger.info(`Password reset for ${email}`);
     res.json({ message: '密码重置成功，请登录' });
@@ -286,8 +295,9 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    // TODO: 验证密码哈希
-    if (!user.password_hash.endsWith(password)) {
+    // ✅ 使用 bcrypt 验证密码
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -296,8 +306,12 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({ error: 'email_not_verified' });
     }
 
-    // TODO: 生成 JWT token
-    const token = `dummy_token_${user.id}`;
+    // ✅ 生成真实 JWT token
+    const token = generateToken({
+      userId: user.id,
+      email: user.email,
+      isAdmin: user.is_admin ?? false,
+    });
 
     res.json({
       token,
@@ -319,72 +333,64 @@ router.post('/login', async (req, res) => {
 });
 
 // 获取当前用户
-router.get('/me', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer dummy_token_')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const userId = authHeader.replace('Bearer dummy_token_', '');
+router.get('/me', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT id, email, username, avatar_url, is_admin FROM users WHERE id = $1',
-      [userId]
+      [req.user!.userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.json({ user: result.rows[0] });
   } catch (err) {
+    logger.error('Get user error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // 更新头像
-router.put('/profile', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer dummy_token_')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const userId = authHeader.replace('Bearer dummy_token_', '');
+router.put('/profile', authenticate, async (req, res) => {
   try {
     const { avatar_url } = z.object({ avatar_url: z.string().max(500000) }).parse(req.body);
     const result = await pool.query(
       'UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, username, avatar_url, is_admin',
-      [avatar_url, userId]
+      [avatar_url, req.user!.userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.json({ user: result.rows[0] });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed' });
+    logger.error('Update profile error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // 修改密码（需验证旧密码）
-router.put('/change-password', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer dummy_token_')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const userId = authHeader.replace('Bearer dummy_token_', '');
+router.put('/change-password', authenticate, async (req, res) => {
   try {
     const { oldPassword, newPassword } = z.object({
       oldPassword: z.string().min(1),
       newPassword: z.string().min(6),
     }).parse(req.body);
 
-    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user!.userId]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
-    if (!result.rows[0].password_hash.endsWith(oldPassword)) {
+    // ✅ 使用 bcrypt 验证旧密码
+    const validOldPassword = await bcrypt.compare(oldPassword, result.rows[0].password_hash);
+    if (!validOldPassword) {
       return res.status(400).json({ error: '原密码错误' });
     }
 
+    // ✅ 使用 bcrypt 哈希新密码
+    const newPasswordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await pool.query(
       'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-      [`$hashed$${newPassword}`, userId]
+      [newPasswordHash, req.user!.userId]
     );
     res.json({ message: '密码修改成功' });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed' });
+    logger.error('Change password error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
