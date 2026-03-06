@@ -5,7 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/__tests__/**/*.test.ts'],
-    testTimeout: 30000,
+    testTimeout: 60000, // 60 秒超时（集成测试需要更长时间）
     coverage: {
       enabled: false,
     },
