@@ -13,7 +13,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "migrate-passwords": "tsx src/scripts/migrate-passwords.ts",
-    "test-auth": "tsx src/scripts/test-auth.ts"
+    "test-auth": "tsx src/scripts/test-auth.ts",
+    "validate-env": "tsx src/scripts/validate-env.ts"
   },
   "dependencies": {
     "@qdrant/js-client-rest": "^1.13.0",

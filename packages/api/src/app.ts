@@ -10,6 +10,7 @@ import { authRoutes } from './routes/auth.js';
 import { documentRoutes } from './routes/document.js';
 import { commentRoutes } from './routes/comment.js';
 import { blockRoutes } from './routes/block.js';
+import { swaggerUi, swaggerSpec } from './swagger.js';
 
 const app: Express = express();
 
@@ -41,6 +42,13 @@ app.use(cookieParser());
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Swagger API 文档
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: '共鸣阅读 API',
+}));
 
 // API 路由
 app.use('/api/auth', authRoutes);
