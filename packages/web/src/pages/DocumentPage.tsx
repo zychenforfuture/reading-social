@@ -527,16 +527,7 @@ export default function DocumentPage() {
             </button>
           )}
           <button
-            onClick={() => {
-              setShowComments(true);
-              // 若当前没有选中的段落，默认选中本章第一个有评论的段落
-              if (!selectedBlock && chapterBlocks.length > 0) {
-                const firstCommentedBlock = chapterBlocks.find(b => blockCommentCount[b.block_hash] > 0);
-                if (firstCommentedBlock) {
-                  setSelectedBlock({ hash: firstCommentedBlock.block_hash, text: firstCommentedBlock.raw_content.split('\n')[0]?.trim() || firstCommentedBlock.raw_content });
-                }
-              }
-            }}
+            onClick={() => setShowComments(v => !v)}
             className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground relative"
           >
             <MessageSquare className="h-4 w-4" />
