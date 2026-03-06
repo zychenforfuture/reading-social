@@ -37,7 +37,7 @@ docker compose -f docker-compose.test.yml up -d > /dev/null 2>&1
 
 # 等待服务就绪
 echo -e "${YELLOW}      等待服务启动...${NC}"
-sleep 8
+sleep 10
 
 # 检查服务状态
 if ! docker compose -f docker-compose.test.yml ps | grep -q "healthy\|Up"; then
@@ -47,9 +47,21 @@ fi
 echo -e "${GREEN}✓ 服务已就绪${NC}"
 echo ""
 
-# 步骤 2: 设置测试环境变量
-echo -e "${YELLOW}[2/4] 配置测试环境...${NC}"
-export NODE_ENV=test
+# 初始化测试数据库表结构
+echo -e "${YELLOW}[2/4] 初始化测试数据库...${NC}"
+docker exec collab-postgres-test psql -U admin -d collab_comments_test -c "
+CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";
+" > /dev/null 2>&1
+
+# 读取并执行项目初始化 SQL
+if [ -f "docker/postgres/init.sql" ]; then
+  docker exec -i collab-postgres-test psql -U admin -d collab_comments_test < docker/postgres/init.sql > /dev/null 2>&1
+fi
+echo -e "${GREEN}✓ 数据库表已创建${NC}"
+echo ""
+
+# 步骤 3: 设置测试环境变量
+echo -e "${YELLOW}[3/4] 配置测试环境...${NC}"
 export DATABASE_URL=postgresql://admin:testpassword@localhost:5433/collab_comments_test
 export REDIS_URL=redis://localhost:6380
 export QDRANT_URL=http://localhost:6334
@@ -61,8 +73,8 @@ export SMTP_PASS=testpassword
 echo -e "${GREEN}✓ 环境变量已配置${NC}"
 echo ""
 
-# 步骤 3: 运行测试
-echo -e "${YELLOW}[3/4] 运行测试...${NC}"
+# 步骤 4: 运行测试
+echo -e "${YELLOW}[4/4] 运行测试...${NC}"
 echo ""
 
 # 检查是否指定了特定测试文件
@@ -77,19 +89,19 @@ fi
 TEST_EXIT_CODE=$?
 echo ""
 
-# 步骤 4: 显示结果
+# 显示结果
 if [ $TEST_EXIT_CODE -eq 0 ]; then
   echo -e "${GREEN}========================================"
   echo "  ✓ 测试全部通过！"
   echo -e "========================================${NC}"
 else
   echo -e "${RED}========================================"
-  echo "  ✗ 测试失败"
+  echo "  ✗ 部分测试失败（查看上方详情）"
   echo -e "========================================${NC}"
 fi
 
 echo ""
-echo -e "${YELLOW}[4/4] 测试完成，自动清理环境...${NC}"
+echo -e "${YELLOW}正在清理测试环境...${NC}"
 
 # 退出码传递给调用者
 exit $TEST_EXIT_CODE
