@@ -709,18 +709,20 @@ export default function DocumentPage() {
       </div>{/* end reading content */}
 
       {/* 内联评论侧栏：同正文并排，sticky 吸附在右侧 */}
-      <CommentPanel
-        inline
-        documentId={id!}
-        comments={allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
-        blockCommentCount={blockCommentCount}
-        selectedBlock={selectedBlock}
-        onClearSelection={() => setSelectedBlock(null)}
-        open={showComments}
-        onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusCommentIds(null); }}
-        focusCommentIds={focusCommentIds}
-        onClearFocus={() => setFocusCommentIds(null)}
-      />
+      {showComments && (
+        <CommentPanel
+          inline
+          documentId={id!}
+          comments={allComments.filter(c => chapterBlockHashSet.has(c.block_hash))}
+          blockCommentCount={blockCommentCount}
+          selectedBlock={selectedBlock}
+          onClearSelection={() => setSelectedBlock(null)}
+          open={showComments}
+          onClose={() => { setShowComments(false); setSelectedBlock(null); setFocusCommentIds(null); }}
+          focusCommentIds={focusCommentIds}
+          onClearFocus={() => setFocusCommentIds(null)}
+        />
+      )}
     </div>
   );
 }
