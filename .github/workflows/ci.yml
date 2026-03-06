@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: collab_comments_test
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: testpassword
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run lint
+        run: pnpm -r lint
+        continue-on-error: true
+
+      - name: Run tests
+        run: pnpm --filter @collab/api test
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://admin:testpassword@localhost:5432/collab_comments_test
+          REDIS_URL: redis://localhost:6379
+          QDRANT_URL: http://localhost:6333
+          JWT_SECRET: test-jwt-secret-for-ci-testing-only-min-32-chars
+          FRONTEND_URL: http://localhost:5173
+          SMTP_HOST: smtp.example.com
+          SMTP_USER: test@example.com
+          SMTP_PASS: testpassword
+
+      - name: Build packages
+        run: pnpm -r build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./packages/api
+          push: false
+          tags: reading-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./packages/web
+          push: false
+          tags: reading-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./packages/worker
+          push: false
+          tags: reading-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [test, docker-build]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check job status
+        run: |
+          if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.docker-build.result }}" == "success" ]; then
+            echo "✅ CI passed - Ready for deployment"
+          else
+            echo "❌ CI failed - Check logs for details"
+            exit 1
+          fi
