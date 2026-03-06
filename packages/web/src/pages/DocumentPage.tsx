@@ -511,7 +511,7 @@ export default function DocumentPage() {
         : 'mx-auto max-w-[740px]',
     )}>
       {/* 阅读内容列 */}
-      <div className={cn('min-w-0 space-y-4 pb-6', showComments ? 'flex-1' : 'w-full')}>
+      <div className={cn('min-w-0 space-y-4', showComments ? 'flex-1' : 'w-full')}>
       {/* 后台继续加载，不显示进度提示 */}
       {/* 标题行 */}
       <div className="flex items-center justify-between">
