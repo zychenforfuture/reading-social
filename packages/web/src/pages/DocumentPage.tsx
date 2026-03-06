@@ -530,6 +530,7 @@ export default function DocumentPage() {
             onClick={() => {
               setShowComments(true);
               setSelectedBlock(null);
+              setFocusCommentIds(null);
             }}
             className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground relative"
           >
