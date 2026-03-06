@@ -8,7 +8,9 @@
     "build:api": "pnpm --filter @collab/api build",
     "build:web": "pnpm --filter @collab/web build",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test"
+    "test": "./scripts/test.sh",
+    "test:quick": "pnpm --filter @collab/api test",
+    "test:watch": "pnpm --filter @collab/api test:watch"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
