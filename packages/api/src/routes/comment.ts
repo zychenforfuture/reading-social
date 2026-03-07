@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { authenticate, optionalAuth } from '../middleware/auth.js';
+import { notificationQueue, type NotificationJobData } from '../config/notificationQueue.js';
 
 /** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
 function normalizeSentence(text: string): string {
@@ -255,6 +256,40 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
             broadcastToDocument(row.document_id, { type: 'new_reply', rootId, reply });
           }
         } catch { /* 广播失败不影响响应 */ }
+
+        // 创建通知：回复根评论作者
+        try {
+          const rootCommentRow = await pool.query('SELECT user_id FROM comments WHERE id = $1', [rootId]);
+          const rootAuthorId = rootCommentRow.rows[0]?.user_id;
+          if (rootAuthorId && rootAuthorId !== userId) {
+            const notificationData: NotificationJobData = {
+              userId: rootAuthorId,
+              type: 'reply',
+              title: '有人回复了你的评论',
+              content: content.substring(0, 200),
+              data: { commentId: reply.id, rootId, documentId: inheritedBlockHash },
+            };
+            await notificationQueue.add('send-notification', notificationData);
+          }
+        } catch (err) {
+          logger.error('Failed to create reply notification:', err);
+        }
+
+        // 创建通知：@某人
+        if (replyToUserId && replyToUserId !== userId) {
+          try {
+            const notificationData: NotificationJobData = {
+              userId: replyToUserId,
+              type: 'mention',
+              title: '有人在评论中提到了你',
+              content: content.substring(0, 200),
+              data: { commentId: reply.id, rootId },
+            };
+            await notificationQueue.add('send-notification', notificationData);
+          } catch (err) {
+            logger.error('Failed to create mention notification:', err);
+          }
+        }
 
         return res.status(201).json({ comment: reply });
       } catch (err) {

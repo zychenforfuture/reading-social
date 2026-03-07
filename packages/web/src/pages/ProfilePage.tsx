@@ -1,7 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { api } from '../lib/utils';
+import { MessageSquare } from 'lucide-react';
+import { useNotifications } from '../hooks/useNotifications';
 
 // 预设头像（使用 DiceBear Bottts + Adventurer 风格）
 const PRESET_AVATARS = [
@@ -44,8 +46,14 @@ function AvatarDisplay({ avatarUrl, username, size = 80 }: { avatarUrl?: string;
 export default function ProfilePage() {
   const { user, updateUser } = useUserStore();
   const navigate = useNavigate();
+  const { unreadCount, fetchUnreadCount } = useNotifications();
 
   const [activeTab, setActiveTab] = useState<'avatar' | 'password'>('avatar');
+
+  // 加载未读数量
+  useEffect(() => {
+    fetchUnreadCount();
+  }, [fetchUnreadCount]);
 
   // 头像 tab 状态
   const [selectedAvatar, setSelectedAvatar] = useState<string>(user?.avatar_url || '');
@@ -145,7 +153,21 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="max-w-2xl mx-auto">
         {/* 页面标题 */}
-        <h1 className="text-2xl font-bold text-gray-800 mb-6">个人中心</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-800">个人中心</h1>
+          <button
+            onClick={() => navigate('/profile/messages')}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-teal-500 hover:bg-teal-600 rounded-lg transition-colors"
+          >
+            <MessageSquare className="w-4 h-4" />
+            我的消息
+            {unreadCount > 0 && (
+              <span className="px-2 py-0.5 text-xs bg-white/20 rounded-full">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+        </div>
 
         {/* Tab 栏 */}
         <div className="flex border-b border-gray-200 mb-6">

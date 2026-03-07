@@ -2,6 +2,7 @@ import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { FileText, LogOut, Menu, X } from 'lucide-react';
 import { useState } from 'react';
+import { NotificationBell } from './NotificationBell';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -35,6 +36,7 @@ export default function Layout() {
           <div className="flex flex-1 items-center justify-end space-x-2">
             {isAuthenticated ? (
               <>
+                <NotificationBell />
                 <Link
                   to="/profile"
                   title={user?.username}

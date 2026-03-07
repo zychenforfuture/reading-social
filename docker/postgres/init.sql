@@ -101,6 +101,21 @@ CREATE TABLE IF NOT EXISTS document_embeddings (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 用户通知表
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,  -- reply, mention, system, like
+    title VARCHAR(200) NOT NULL,
+    content TEXT,
+    data JSONB DEFAULT '{}',  -- 额外数据 {commentId, documentId, etc.}
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_is_read ON notifications(user_id, is_read);
+CREATE INDEX idx_notifications_created_at ON notifications(user_id, created_at DESC);
+
 -- 更新时间的触发器函数
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
