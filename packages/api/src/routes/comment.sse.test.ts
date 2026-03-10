@@ -5,14 +5,14 @@
  * 1. 模拟客户端连接和断开
  * 2. 验证 cleanup 函数不会重复执行
  * 3. 验证 sseClients Map 正确清理
+ * 4. 实际 SSE 连接测试（需要完整环境）
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// 模拟测试（实际测试需要在完整环境中运行）
-describe('SSE Memory Leak Fix', () => {
-  it('should prevent duplicate cleanup', () => {
-    // 测试 cleanup 函数的幂等性
+// 单元测试：模拟测试
+describe('SSE Memory Leak Fix - Unit Tests', () => {
+  it('应该防止重复清理（cleanup 幂等性）', () => {
     let cleaned = false;
     let cleanupCount = 0;
 
@@ -31,8 +31,7 @@ describe('SSE Memory Leak Fix', () => {
     expect(cleaned).toBe(true);
   });
 
-  it('should track heartbeat timers', () => {
-    // 验证 WeakMap 可以正确存储和检索定时器
+  it('应该追踪心跳定时器（WeakMap 功能）', () => {
     const heartbeats = new WeakMap<any, NodeJS.Timeout>();
     const mockRes = {} as any;
     const timer = setInterval(() => {}, 1000);
@@ -45,8 +44,7 @@ describe('SSE Memory Leak Fix', () => {
     clearInterval(timer);
   });
 
-  it('should clean up writableEnded connections', () => {
-    // 验证兜底清理逻辑
+  it('应该清理 writableEnded 连接（兜底机制）', () => {
     const mockClients = new Set([
       { writableEnded: true },
       { writableEnded: false },
@@ -61,6 +59,25 @@ describe('SSE Memory Leak Fix', () => {
     }
 
     expect(toRemove.length).toBe(2);
+  });
+});
+
+// 集成测试：实际 SSE 连接测试（需要完整环境）
+describe('SSE Memory Leak Fix - Integration Tests', () => {
+  it.skip('应该建立 SSE 连接并接收心跳', async () => {
+    // 这个测试需要在完整环境中运行
+    // 使用 curl 或 HTTP 客户端建立 SSE 连接
+    // 验证接收到 ": connected" 和 ": ping" 消息
+    // 暂时跳过，手动测试
+  });
+
+  it.skip('应该正确清理断开的 SSE 连接', async () => {
+    // 这个测试需要在完整环境中运行
+    // 1. 建立 SSE 连接
+    // 2. 断开连接
+    // 3. 验证 sseClients.size 减少
+    // 4. 验证日志中有 "SSE disconnected" 消息
+    // 暂时跳过，手动测试
   });
 });
 
