@@ -4,7 +4,6 @@ import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { authenticate, optionalAuth } from '../middleware/auth.js';
-import { notificationQueue, type NotificationJobData } from '../config/notificationQueue.js';
 
 /** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
 function normalizeSentence(text: string): string {
@@ -77,6 +76,8 @@ const router: Router = Router();
 // ─── SSE 客户端注册表 ────────────────────────────────────────────
 // documentId → Set<Response>（存每个打开文档的长连接）
 const sseClients = new Map<string, Set<Response>>();
+// 跟踪每个连接的心跳定时器，用于清理
+const sseHeartbeats = new WeakMap<Response, NodeJS.Timeout>();
 
 function addSseClient(documentId: string, res: Response): void {
   if (!sseClients.has(documentId)) sseClients.set(documentId, new Set());
@@ -99,6 +100,35 @@ function broadcastToDocument(documentId: string, data: object): void {
     try { res.write(payload); } catch { /* 客户端已断开 */ }
   }
 }
+
+/**
+ * 清理断开的 SSE 客户端（兜底机制）
+ * 每 5 分钟运行一次，清理 writableEnded 的连接
+ */
+function cleanupTimeout(): void {
+  let cleanedCount = 0;
+  for (const [documentId, clients] of sseClients.entries()) {
+    const toRemove: Response[] = [];
+    for (const res of clients) {
+      if (res.writableEnded) {
+        toRemove.push(res);
+      }
+    }
+    for (const res of toRemove) {
+      const heartbeat = sseHeartbeats.get(res);
+      if (heartbeat) clearInterval(heartbeat);
+      removeSseClient(documentId, res);
+      cleanedCount++;
+    }
+  }
+  if (cleanedCount > 0) {
+    logger.info(`SSE timeout cleanup: removed ${cleanedCount} stale clients`);
+  }
+}
+
+// 启动全局定期清理（每 5 分钟）
+setInterval(() => cleanupTimeout(), 5 * 60 * 1000);
+logger.info('SSE timeout cleanup scheduled every 5 minutes');
 // ────────────────────────────────────────────────────────────────
 
 const commentSchema = z.object({
@@ -127,16 +157,26 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
   addSseClient(documentId, res);
   logger.info(`SSE connected: doc=${documentId.substring(0, 8)}… clients=${sseClients.get(documentId)?.size}`);
 
-  // 每 25s 发心跳，防止 nginx/负载均衡器因空闲超时断开连接
+  // 每 30s 发心跳，防止 nginx/负载均衡器因空闲超时断开连接
   const heartbeat = setInterval(() => {
     try { res.write(': ping\n\n'); } catch { clearInterval(heartbeat); }
-  }, 25000);
+  }, 30000);
+  sseHeartbeats.set(res, heartbeat);
 
-  req.on('close', () => {
+  // 清理函数：确保只清理一次
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     clearInterval(heartbeat);
+    sseHeartbeats.delete(res);
     removeSseClient(documentId, res);
-    logger.info(`SSE disconnected: doc=${documentId.substring(0, 8)}…`);
-  });
+    logger.info(`SSE disconnected: doc=${documentId.substring(0, 8)}… remaining=${sseClients.get(documentId)?.size ?? 0}`);
+  };
+
+  // 监听 socket 和 response 的关闭事件（双重保险）
+  req.socket.on('close', cleanup);
+  res.on('close', cleanup);
 });
 
 // 获取根评论下的所有回复（二级扁平）
@@ -256,40 +296,6 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
             broadcastToDocument(row.document_id, { type: 'new_reply', rootId, reply });
           }
         } catch { /* 广播失败不影响响应 */ }
-
-        // 创建通知：回复根评论作者
-        try {
-          const rootCommentRow = await pool.query('SELECT user_id FROM comments WHERE id = $1', [rootId]);
-          const rootAuthorId = rootCommentRow.rows[0]?.user_id;
-          if (rootAuthorId && rootAuthorId !== userId) {
-            const notificationData: NotificationJobData = {
-              userId: rootAuthorId,
-              type: 'reply',
-              title: '有人回复了你的评论',
-              content: content.substring(0, 200),
-              data: { commentId: reply.id, rootId, documentId: inheritedBlockHash },
-            };
-            await notificationQueue.add('send-notification', notificationData);
-          }
-        } catch (err) {
-          logger.error('Failed to create reply notification:', err);
-        }
-
-        // 创建通知：@某人
-        if (replyToUserId && replyToUserId !== userId) {
-          try {
-            const notificationData: NotificationJobData = {
-              userId: replyToUserId,
-              type: 'mention',
-              title: '有人在评论中提到了你',
-              content: content.substring(0, 200),
-              data: { commentId: reply.id, rootId },
-            };
-            await notificationQueue.add('send-notification', notificationData);
-          } catch (err) {
-            logger.error('Failed to create mention notification:', err);
-          }
-        }
 
         return res.status(201).json({ comment: reply });
       } catch (err) {
