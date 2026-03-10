@@ -18,6 +18,7 @@ packages/web/vite.config.js
 .env
 .env.local
 .env.production
+.env.development
 .env.*.local
 packages/api/.env
 packages/web/.env
