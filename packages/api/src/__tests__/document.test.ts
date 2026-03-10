@@ -250,4 +250,179 @@ describe('Document Management Tests', () => {
       expect(['processing', 'ready', 'error']).toContain(docRes.body.document.status);
     });
   });
+
+  // ──────────────────────────────────────────────────────────────────
+  // 📤 秒传重复上传测试（新增）
+  // ──────────────────────────────────────────────────────────────────
+
+  describe('秒传重复上传测试', () => {
+    let другойToken: string;
+    let другойUserId: string;
+    const DEUTSCH_PASSWORD = 'AnotherUser123!';
+    const DEUTSCH_USERNAME = 'deutsch_tester';
+    
+    const TEST_FILE_CONTENT = '这是用于秒传测试的文件内容。\n包含多行文本。';
+
+    beforeAll(async () => {
+      // 创建第二个测试用户
+      const bcrypt = await import('bcryptjs');
+      const passwordHash = await bcrypt.hash(DEUTSCH_PASSWORD, 10);
+      
+      const userResult = await pool.query(
+        `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
+         VALUES ($1, $2, $3, true, false)
+         RETURNING id`,
+        [`deutsch_${Date.now()}@example.com`, DEUTSCH_USERNAME, passwordHash]
+      );
+      
+      RodriguezUserId = userResult.rows[0].id;
+
+      // 登录获取 token
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ 
+          email: `deutsch_${Date.now()}@example.com`, 
+          password: DEUTSCH_PASSWORD 
+        });
+
+      if (loginRes.status === 200) {
+        другоеToken = loginRes.body.token;
+      }
+    });
+
+    afterAll(async () => {
+      try {
+        await pool.query('DELETE FROM documents WHERE user_id = $1', [другойUserId]);
+        await pool.query('DELETE FROM users WHERE id = $1', [другойUserId]);
+      } catch (e) {
+        // Ignore
+      }
+    });
+
+    it('同一用户重复上传应该秒传（返回已存在文档）', async () => {
+      // 第一次上传
+      const firstUploadRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          title: '秒传测试文档',
+          content: TEST_FILE_CONTENT,
+        });
+
+      expect(firstUploadRes.status).toBe(200);
+      expect(firstUploadRes.body.document).toHaveProperty('id');
+      expect(firstUploadRes.body.document.status).toBe('processing');
+
+      const documentId = firstUploadRes.body.document.id;
+
+      // 等待处理完成
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // 第二次上传相同内容（秒传）
+      const secondUploadRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          title: '秒传测试文档（重复）',
+          content: TEST_FILE_CONTENT,
+        });
+
+      expect(secondUploadRes.status).toBe(200);
+      
+      // 秒传应该返回 message 字段
+      if (secondUploadRes.body.message) {
+        expect(secondUploadRes.body.message).toContain('quick upload');
+      }
+      
+      // 应该返回同一个 document
+      expect(secondUploadRes.body.document.id).toBe(documentId);
+    });
+
+    it('不同用户上传相同文件应该去重（创建引用）', async () => {
+      // 第一个用户上传
+      const firstUploadRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          title: '共享文件 - 用户 A',
+          content: TEST_FILE_CONTENT,
+        });
+
+      expect(firstUploadRes.status).toBe(200);
+      const canonicalDocId = firstUploadRes.body.document.id;
+
+      // 等待处理完成
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // 第二个用户上传相同文件（去重）
+      const secondUploadRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${другоеToken}`)
+        .send({
+          title: '共享文件 - 用户 B',
+          content: TEST_FILE_CONTENT,
+        });
+
+      expect(secondUploadRes.status).toBe(200);
+      
+      // 去重应该返回 deduped 消息
+      if (secondUploadRes.body.message) {
+        expect(secondUploadRes.body.message).toContain('deduped');
+      }
+      
+      // 应该返回引用文档（不同 ID）
+      expect(secondUploadRes.body.document.id).not.toBe(canonicalDocId);
+      
+      // 引用文档应该有 canonical_document_id
+      expect(secondUploadRes.body.document).toHaveProperty('canonical_document_id');
+      expect(secondUploadRes.body.document.canonical_document_id).toBe(canonicalDocId);
+    });
+
+    it('去重后两个用户都应该能访问文件', async () => {
+      // 用户 A 访问
+      const docARes = await request(app)
+        .get(`/api/documents/${testDocumentId}`)
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(docARes.status).toBe(200);
+      expect(docARes.body).toHaveProperty('document');
+
+      // 用户 B 访问（引用）
+      const docBRes = await request(app)
+        .get(`/api/documents/${testDocumentId}`) // 假设去重后用同一个 ID 获取
+        .set('Authorization', `Bearer ${другоеToken}`);
+
+      expect(docBRes.status).toBe(200);
+      expect(docBRes.body).toHaveProperty('document');
+    });
+
+    it('不同用户上传不同文件不应该去重', async () => {
+      const uniqueContent = `这是另一个唯一文件。\nContent: ${Date.now()}`;
+      
+      const userARes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          title: '唯一文件 A',
+          content: uniqueContent,
+        });
+
+      expect(userARes.status).toBe(200);
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const userBRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${другоеToken}`)
+        .send({
+          title: '唯一文件 B',
+          content: uniqueContent,
+        });
+
+      expect(userBRes.status).toBe(200);
+      
+      // 两个不同的文档
+      expect(userBRes.body.document.id).not.toBe(userARes.body.document.id);
+    });
+  });
 });
