@@ -3,6 +3,7 @@ export function cleanText(input: string, maxLen = 5000): string {
   // 移除 null 字节
   let s = input.replace(/\0/g, '');
   // 移除大多数控制字符，保留常见换行和制表符
+  // eslint-disable-next-line no-control-regex
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   // 统一 CRLF 为 LF
   s = s.replace(/\r\n?/g, '\n');

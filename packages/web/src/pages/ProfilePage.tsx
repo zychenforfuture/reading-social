@@ -46,7 +46,7 @@ function AvatarDisplay({ avatarUrl, username, size = 80 }: { avatarUrl?: string;
 export default function ProfilePage() {
   const { user, updateUser } = useUserStore();
   const navigate = useNavigate();
-  const { unreadCount, fetchUnreadCount } = useNotifications();
+  const { unreadCount, refetch: fetchUnreadCount } = useNotifications();
 
   const [activeTab, setActiveTab] = useState<'avatar' | 'password'>('avatar');
 

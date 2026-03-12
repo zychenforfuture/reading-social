@@ -299,7 +299,10 @@ router.get('/block/:hash', optionalAuth, async (req, res) => {
 // 创建评论（根评论或回复）
 router.post('/', authenticate, async (req: Request, res: Response) => {
   try {
-    let { content, blockHash, rootId, replyToUserId, selectedText } = commentSchema.parse(req.body);
+    const parsedBody = commentSchema.parse(req.body);
+    const { blockHash, rootId, replyToUserId } = parsedBody;
+    let content = parsedBody.content;
+    let selectedText = parsedBody.selectedText;
 
     // 清理输入以去除 null 字节和不可见控制字符，限制长度
     content = cleanText(content, 5000);
@@ -461,7 +464,8 @@ router.patch('/:id', authenticate, async (req, res) => {
       content: z.string().min(1).max(5000).optional(),
       isResolved: z.boolean().optional(),
     }).parse(req.body);
-    let { content, isResolved } = parsed;
+    const { isResolved } = parsed;
+    let { content } = parsed;
     if (content !== undefined) content = cleanText(content, 5000);
 
     const { userId, isAdmin } = req.user!;

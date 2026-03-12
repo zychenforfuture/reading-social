@@ -13,5 +13,6 @@ export function useNotifications() {
     staleTime: 10000,
   });
 
-  return { unreadCount: data?.count ?? 0, refetch };
+  // 同时返回 `refetch` 与兼容旧名 `fetchUnreadCount`
+  return { unreadCount: data?.count ?? 0, refetch, fetchUnreadCount: refetch };
 }
