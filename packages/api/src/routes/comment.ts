@@ -310,7 +310,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
         // 从根评论继承 block_hash
         const rootRow = await client.query(
-          'SELECT block_hash, user_id FROM comments WHERE id = $1 AND root_id IS NULL AND is_deleted = false',
+          'SELECT block_hash, user_id, content, selected_text FROM comments WHERE id = $1 AND root_id IS NULL AND is_deleted = false',
           [rootId]
         );
         if (rootRow.rows.length === 0) {
@@ -370,6 +370,8 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
             documentId: nd?.id,
             documentTitle: nd?.title,
             blockHash: inheritedBlockHash,
+            originalContent: (rootRow.rows[0].content as string | undefined)?.slice(0, 150),
+            selectedText: (rootRow.rows[0].selected_text as string | undefined)?.slice(0, 200) || undefined,
           };
           if (rootAuthorId && rootAuthorId !== userId) {
             await createNotification({
@@ -607,6 +609,7 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
       await client.query('COMMIT');
 
       // 广播到所有包含该 block 的文档（包含去重引用文档）
+      let broadcastDocRows: { document_id: string }[] = [];
       try {
         const docRows = await pool.query(
           `SELECT DISTINCT d.id AS document_id
@@ -615,10 +618,47 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
            WHERE db.block_hash = $1`,
           [blockHash]
         );
-        for (const row of docRows.rows) {
+        broadcastDocRows = docRows.rows;
+        for (const row of broadcastDocRows) {
           broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount });
         }
       } catch { /* 广播失败不影响正常响应 */ }
+
+      // 点赞时通知评论作者（取消点赞不通知）
+      if (liked) {
+        try {
+          const authorRow = await pool.query(
+            'SELECT user_id, content FROM comments WHERE id = $1',
+            [id]
+          );
+          const authorId: string | null = authorRow.rows[0]?.user_id ?? null;
+          if (authorId && authorId !== userId) {
+            const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+            const senderName: string = senderRow.rows[0]?.username || '有人';
+            const nd = broadcastDocRows[0]
+              ? await pool.query(
+                  `SELECT d.id, d.title FROM documents d
+                   JOIN document_blocks db ON db.document_id = d.id
+                   WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`,
+                  [blockHash]
+                ).then(r => r.rows[0])
+              : null;
+            await createNotification({
+              userId: authorId,
+              type: 'like',
+              title: `${senderName} 点赞了你的评论`,
+              content: (authorRow.rows[0]?.content as string | undefined)?.slice(0, 100),
+              data: {
+                commentId: id,
+                documentId: nd?.id,
+                documentTitle: nd?.title,
+                blockHash,
+                originalContent: (authorRow.rows[0]?.content as string | undefined)?.slice(0, 150),
+              },
+            });
+          }
+        } catch { /* 通知失败不影响响应 */ }
+      }
 
       res.json({ liked, likeCount });
     } catch (err) {

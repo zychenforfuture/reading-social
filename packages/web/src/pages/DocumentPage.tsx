@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
@@ -14,6 +14,7 @@ import { buildChapters } from '../utils/chapterUtils';
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [selectedBlock, setSelectedBlock] = useState<{ hash: string; text: string } | null>(null);
   const [currentChapter, setCurrentChapter] = useState(0);
@@ -215,6 +216,32 @@ export default function DocumentPage() {
     () => buildChapters(allBlocks, blockCommentCount),
     [allBlocks, blockCommentCount],
   );
+
+  // 从通知跳转：URL 中带有 ?block=xxx 时，自动定位到对应段落并打开评论
+  const pendingBlockRef = useRef<string | null>(searchParams.get('block'));
+  useEffect(() => {
+    const blockHash = pendingBlockRef.current;
+    if (!blockHash || allBlocks.length === 0 || chapters.length === 0) return;
+    pendingBlockRef.current = null;
+    // 清除 URL 中的 block 参数，避免刷新时重复触发
+    setSearchParams(prev => { prev.delete('block'); return prev; }, { replace: true });
+    // 找到该 block 属于哪个章节
+    const blockIndex = allBlocks.findIndex(b => b.block_hash === blockHash);
+    if (blockIndex === -1) return;
+    const ch = chapters.find(c => blockIndex >= c.blockStart && blockIndex < c.blockStart + c.blockCount);
+    const chapterIdx = ch ? chapters.indexOf(ch) : 0;
+    // 切换到对应章节，选中该 block，打开评论抽屉
+    setCurrentChapter(chapterIdx);
+    setSelectedBlock({ hash: blockHash, text: allBlocks[blockIndex]!.raw_content.slice(0, 100) });
+    setFocusCommentIds(null);
+    setShowComments(true);
+    // 切换章节后等 DOM 刷新再滚动
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-block-hash="${blockHash}"]`) as HTMLElement | null;
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allBlocks.length, chapters.length]);
 
   // 章节列表首次建立（或文档切换后重建）时，恢复上次阅读位置
   useEffect(() => {
