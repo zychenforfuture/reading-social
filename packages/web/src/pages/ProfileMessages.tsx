@@ -70,7 +70,12 @@ export default function ProfileMessages() {
 
   function handleClickNotification(n: Notification) {
     if (!n.is_read) markRead.mutate(n.id);
-    if (n.data?.documentId) navigate(`/documents/${n.data.documentId}`);
+    if (n.data?.documentId) {
+      const url = n.data.blockHash
+        ? `/documents/${n.data.documentId}?block=${n.data.blockHash}`
+        : `/documents/${n.data.documentId}`;
+      navigate(url);
+    }
   }
 
   const allSelected = notifications.length > 0 && notifications.every(n => selected.has(n.id));
