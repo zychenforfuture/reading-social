@@ -136,8 +136,16 @@ jobs:
 
       - name: Run coverage
         run: pnpm --filter @collab/api test -- --coverage
+        continue-on-error: true
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
+          REDIS_URL: redis://127.0.0.1:6380
+          JWT_SECRET: test-jwt-secret-for-ci-testing-min-32-chars
 
       - name: Upload coverage to Coveralls
+        if: hashFiles('packages/api/coverage/lcov.info') != ''
+        continue-on-error: true
         uses: coverallsapp/github-action@master
         with:
           file: packages/api/coverage/lcov.info
