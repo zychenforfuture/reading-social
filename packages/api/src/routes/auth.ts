@@ -117,7 +117,7 @@ async function createInitialAdmin() {
   logger.info(`Initial admin created: ${email} (${username})`);
 }
 
-// 从环境变量同步管理员邮箱列表
+// 从环境变量同步管理员邮箱列表（只授权，不自动撤销）
 async function syncAdminEmails() {
   const raw = process.env.ADMIN_EMAILS || '';
   const adminEmails = raw
@@ -127,18 +127,13 @@ async function syncAdminEmails() {
 
   if (adminEmails.length === 0) return;
 
-  // 将列表内邮箱设为管理员
-  await pool.query(
-    `UPDATE users SET is_admin = true WHERE LOWER(email) = ANY($1::text[])`,
-    [adminEmails]
-  );
-  // 将不在列表中的邮箱取消管理员
-  await pool.query(
-    `UPDATE users SET is_admin = false WHERE LOWER(email) != ALL($1::text[])`,
+  const result = await pool.query(
+    `UPDATE users SET is_admin = true WHERE LOWER(email) = ANY($1::text[]) RETURNING email`,
     [adminEmails]
   );
 
-  logger.info(`Admin emails synced: ${adminEmails.join(', ')}`);
+  logger.info(`Admin emails synced (${result.rowCount} granted): ${adminEmails.join(', ')}`);
+  return result.rowCount ?? 0;
 }
 
 runMigration();
@@ -435,6 +430,22 @@ router.put('/change-password', authenticate, async (req, res) => {
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed' });
     logger.error('Change password error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /auth/admin/sync — 管理员触发同步（无需重启）
+router.post('/admin/sync', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.user!;
+    const adminCheck = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
+    if (!adminCheck.rows[0]?.is_admin) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const granted = await syncAdminEmails();
+    res.json({ message: 'Admin emails synced', granted });
+  } catch (err) {
+    logger.error('Admin sync error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

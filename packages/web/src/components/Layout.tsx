@@ -2,6 +2,7 @@ import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { FileText, LogOut, Menu, X } from 'lucide-react';
 import { useState } from 'react';
+import NotificationBell from './NotificationBell';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -52,6 +53,7 @@ export default function Layout() {
                     </div>
                   )}
                 </Link>
+                <NotificationBell />
                 <button
                   onClick={handleLogout}
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-muted h-9 px-4 py-2"

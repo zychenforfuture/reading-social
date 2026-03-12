@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { authenticate, optionalAuth } from '../middleware/auth.js';
+import { createNotification } from '../utils/notifications.js';
 
 /** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
 function normalizeSentence(text: string): string {
@@ -309,7 +310,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
         // 从根评论继承 block_hash
         const rootRow = await client.query(
-          'SELECT block_hash FROM comments WHERE id = $1 AND root_id IS NULL AND is_deleted = false',
+          'SELECT block_hash, user_id FROM comments WHERE id = $1 AND root_id IS NULL AND is_deleted = false',
           [rootId]
         );
         if (rootRow.rows.length === 0) {
@@ -317,6 +318,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
           return res.status(404).json({ error: 'Root comment not found' });
         }
         const inheritedBlockHash: string = rootRow.rows[0].block_hash;
+        const rootAuthorId: string | null = rootRow.rows[0].user_id ?? null;
 
         const result = await client.query(
           `INSERT INTO comments (block_hash, user_id, content, root_id, reply_to_user_id, selected_text)
@@ -352,6 +354,42 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
             broadcastToDocument(row.document_id, { type: 'new_reply', rootId, reply });
           }
         } catch { /* 广播失败不影响响应 */ }
+
+        // 异步发送通知（非阻塞，失败不影响响应）
+        try {
+          const notifDocRow = await pool.query(
+            `SELECT d.id, d.title FROM documents d
+             JOIN document_blocks db ON db.document_id = d.id
+             WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`,
+            [inheritedBlockHash]
+          );
+          const nd = notifDocRow.rows[0];
+          const senderName: string = reply.username || '有人';
+          const notifData = {
+            commentId: reply.id,
+            documentId: nd?.id,
+            documentTitle: nd?.title,
+            blockHash: inheritedBlockHash,
+          };
+          if (rootAuthorId && rootAuthorId !== userId) {
+            await createNotification({
+              userId: rootAuthorId,
+              type: 'reply',
+              title: `${senderName} 回复了你的评论`,
+              content: content.slice(0, 100),
+              data: notifData,
+            });
+          }
+          if (replyToUserId && replyToUserId !== userId && replyToUserId !== rootAuthorId) {
+            await createNotification({
+              userId: replyToUserId,
+              type: 'mention',
+              title: `${senderName} 在评论中提到了你`,
+              content: content.slice(0, 100),
+              data: notifData,
+            });
+          }
+        } catch { /* 通知失败不影响响应 */ }
 
         return res.status(201).json({ comment: reply });
       } catch (err) {

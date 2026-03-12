@@ -30,6 +30,13 @@ export const api: {
   getBlockSimilar: (hash: string) => Promise<{ similar?: SimilarBlock[] }>;
   updateProfile: (avatarUrl: string) => Promise<{ user: User }>;
   changePassword: (oldPassword: string, newPassword: string) => Promise<{ message: string }>;
+  getUnreadNotificationCount: () => Promise<{ count: number }>;
+  getNotifications: (params?: { unread?: boolean; limit?: number; offset?: number }) => Promise<{ notifications: Notification[]; total: number }>;
+  markNotificationRead: (id: string) => Promise<unknown>;
+  markAllNotificationsRead: () => Promise<unknown>;
+  markNotificationsReadBatch: (ids: string[]) => Promise<unknown>;
+  deleteNotification: (id: string) => Promise<unknown>;
+  deleteNotificationsBatch: (ids: string[]) => Promise<unknown>;
 } = {
   // @ts-ignore - Vite 环境变量
   baseURL: import.meta.env?.VITE_API_URL || '/api',
@@ -141,6 +148,28 @@ export const api: {
     api.request<{ user: User }>('/auth/profile', { method: 'PUT', body: JSON.stringify({ avatar_url: avatarUrl }) }),
   changePassword: (oldPassword: string, newPassword: string) =>
     api.request<{ message: string }>('/auth/change-password', { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) }),
+
+  // Notifications
+  getUnreadNotificationCount: () =>
+    api.request<{ count: number }>('/notifications/unread-count'),
+  getNotifications: (params?: { unread?: boolean; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.unread !== undefined) q.set('unread', String(params.unread));
+    if (params?.limit   !== undefined) q.set('limit',  String(params.limit));
+    if (params?.offset  !== undefined) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    return api.request<{ notifications: Notification[]; total: number }>(`/notifications${qs ? '?' + qs : ''}`);
+  },
+  markNotificationRead: (id: string) =>
+    api.request<unknown>(`/notifications/${id}/read`, { method: 'PUT' }),
+  markAllNotificationsRead: () =>
+    api.request<unknown>('/notifications/read-all', { method: 'PUT' }),
+  markNotificationsReadBatch: (ids: string[]) =>
+    api.request<unknown>('/notifications/read-batch', { method: 'PUT', body: JSON.stringify({ ids }) }),
+  deleteNotification: (id: string) =>
+    api.request<unknown>(`/notifications/${id}`, { method: 'DELETE' }),
+  deleteNotificationsBatch: (ids: string[]) =>
+    api.request<unknown>('/notifications/delete-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
 };
 
 export type User = {
@@ -187,6 +216,22 @@ export type Comment = {
   created_at: string;
   updated_at: string;
   replies?: Comment[];
+};
+
+export type Notification = {
+  id: string;
+  user_id: string;
+  type: 'reply' | 'mention' | 'like';
+  title: string;
+  content?: string;
+  data?: {
+    commentId?: string;
+    documentId?: string;
+    documentTitle?: string;
+    blockHash?: string;
+  };
+  is_read: boolean;
+  created_at: string;
 };
 
 export type SimilarBlock = {
