@@ -18,6 +18,7 @@ export const documentQueue = new Queue('document-processing', {
     },
     removeOnComplete: 100, // 只保留最近 100 条完成记录
     removeOnFail: 200,     // 保留最近 200 条失败记录供排查
+    timeout: 300000,       // 5 分钟超时（大文档处理需要更长时间）
   },
 });
 

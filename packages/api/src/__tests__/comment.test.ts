@@ -359,4 +359,243 @@ describe('Comment System Tests', () => {
       // 实际项目中应该使用专门的 HTTP 客户端测试 SSE
     });
   });
+
+  // ──────────────────────────────────────────────────────────────────
+  // 🔥 热门评论排序测试（新增）
+  // 热度排序公式：(3×reply_count + like_count) × e^(-0.05×小时数) + 冷启动加成 (2 小时内 +1.5)
+  // ──────────────────────────────────────────────────────────────────
+
+  describe('热门评论排序测试', () => {
+    let sortedAuthToken: string;
+    let testSortedUserId: string;
+    let testSortedDocumentId: string;
+    let blockHash: string;
+    let rootComment1: any;
+    let rootComment2: any;
+    let rootComment3: any;
+
+    const SORTED_TEST_EMAIL = `sorted_test_${Date.now()}@example.com`;
+    const SORTED_TEST_PASSWORD = 'SortedTest123!';
+    const SORTED_TEST_USERNAME = 'sorted_test_user';
+
+    beforeAll(async () => {
+      // 创建测试用户
+      const bcrypt = await import('bcryptjs');
+      const passwordHash = await bcrypt.hash(SORTED_TEST_PASSWORD, 10);
+      
+      const userResult = await pool.query(
+        `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
+         VALUES ($1, $2, $3, true, false)
+         RETURNING id`,
+        [SORTED_TEST_EMAIL, SORTED_TEST_USERNAME, passwordHash]
+      );
+      
+      const userId = userResult.rows[0].id;
+
+      // 登录获取 token
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: SORTED_TEST_EMAIL, password: SORTED_TEST_PASSWORD });
+
+      if (loginRes.status === 200) {
+        sortedAuthToken = loginRes.body.token;
+      }
+
+      // 创建测试文档
+      const docContent = '第一段。\n第二段。\n第三段。';
+      const uploadRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          title: '排序测试文档',
+          content: docContent,
+        });
+
+      testSortedDocumentId = uploadRes.body.document.id;
+
+      // 获取第一个 block_hash
+      const docRes = await request(app)
+        .get(`/api/documents/${testSortedDocumentId}`)
+        .set('Authorization', `Bearer ${sortedAuthToken}`);
+
+      if (docRes.body.content && docRes.body.content.length > 0) {
+        blockHash = docRes.body.content[0].block_hash;
+      }
+    });
+
+    afterAll(async () => {
+      try {
+        await pool.query('DELETE FROM comments WHERE user_id = $1', [testSortedUserId]);
+        await pool.query('DELETE FROM documents WHERE id = $1', [testSortedDocumentId]);
+        await pool.query('DELETE FROM users WHERE email LIKE $1', ['sorted_test_%@example.com']);
+      } catch (e) {
+        // Ignore
+      }
+    });
+
+    it('新评论应该有冷启动加成（2 小时内 +1.5）', async () => {
+      if (!blockHash || !sortedAuthToken) return;
+
+      // 创建多个新评论（时间相近，模拟冷启动）
+      const createComment = async (content: string) => {
+        const res = await request(app)
+          .post('/api/comments')
+          .set('Authorization', `Bearer ${sortedAuthToken}`)
+          .send({
+            content,
+            blockHash,
+          });
+        return res.body.comment;
+      };
+
+      rootComment1 = await createComment('新评论 1（高赞）');
+      rootComment2 = await createComment('新评论 2（低赞）');
+      rootComment3 = await createComment('新评论 3（无赞）');
+
+      // 等待评论创建完成
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // 获取评论列表
+      const commentsRes = await request(app)
+        .get(`/api/documents/${testSortedDocumentId}/comments`);
+
+      expect(commentsRes.status).toBe(200);
+      expect(commentsRes.body.comments).toHaveLength(3);
+
+      // 热门排序应该把新评论放在前面（冷启动加成）
+      const firstComment = commentsRes.body.comments[0];
+      expect(['新评论 1（高赞）', '新评论 2（低赞）', '新评论 3（无赞）'])
+        .toContain(firstComment.content);
+    });
+
+    it('老评论应该随时间衰减', async () => {
+      if (!blockHash || !sortedAuthToken) return;
+
+      // 创建一个老评论（使用 SQL 直接插入，设置较早的 created_at）
+      const oldCommentRes = await pool.query(
+        `INSERT INTO comments (block_hash, user_id, content, like_count, reply_count, created_at)
+         VALUES ($1, $2, $3, 10, 5, NOW() - INTERVAL '72 hours') -- 3 天前
+         RETURNING id`,
+        [blockHash, testSortedUserId, '老评论（高赞但过时）']
+      );
+
+      const oldCommentId = oldCommentRes.rows[0].id;
+
+      // 获取评论列表
+      const commentsRes = await request(app)
+        .get(`/api/documents/${testSortedDocumentId}/comments`);
+
+      expect(commentsRes.status).toBe(200);
+
+      // 老评论应该排在新评论之后（时间衰减）
+      const commentContents = commentsRes.body.comments.map((c: any) => c.content);
+      expect(commentContents.indexOf('老评论（高赞但过时）')).toBeGreaterThan(0);
+    });
+
+    it('高回复评论应该排序更高', async () => {
+      if (!blockHash || !sortedAuthToken) return;
+
+      // 创建评论 1：高回复低点赞
+      const comment1 = await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          content: '评论 A（高回复）',
+          blockHash,
+        });
+
+      // 创建评论 2：低回复高点赞
+      const comment2 = await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          content: '评论 B（高点赞）',
+          blockHash,
+        });
+
+      // 为评论 1 添加回复
+      await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          content: '回复 A1',
+          rootId: comment1.body.comment.id,
+        });
+
+      await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          content: '回复 A2',
+          rootId: comment1.body.comment.id,
+        });
+
+      // 为评论 2 添加点赞
+      await request(app)
+        .post(`/api/comments/${comment2.body.comment.id}/like`)
+        .set('Authorization', `Bearer ${sortedAuthToken}`);
+
+      // 等待
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // 获取排序后的评论
+      const commentsRes = await request(app)
+        .get(`/api/documents/${testSortedDocumentId}/comments`);
+
+      expect(commentsRes.status).toBe(200);
+
+      // 热度公式：(3×reply_count + like_count) ×衰减因子
+      // 评论 A: 3×2 + 0 = 6
+      // 评论 B: 0 + 1 = 1
+      // 评论 A 应该排在前面
+      const contents = commentsRes.body.comments.map((c: any) => c.content);
+      expect(contents.indexOf('评论 A（高回复）')).toBeLessThan(contents.indexOf('评论 B（高点赞）'));
+    });
+
+    it('点赞数应影响排序', async () => {
+      if (!blockHash || !sortedAuthToken) return;
+
+      // 创建新评论 1：5 个赞
+      const comment1 = await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          content: '点赞热门评论',
+          blockHash,
+        });
+
+      // 模拟 5 个赞（直接更新数据库）
+      await pool.query(
+        `UPDATE comments SET like_count = 5 WHERE id = $1`,
+        [comment1.body.comment.id]
+      );
+
+      // 创建新评论 2：1 个赞
+      const comment2 = await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${sortedAuthToken}`)
+        .send({
+          content: '低点赞评论',
+          blockHash,
+        });
+
+      await pool.query(
+        `UPDATE comments SET like_count = 1 WHERE id = $1`,
+        [comment2.body.comment.id]
+      );
+
+      // 等待
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // 获取排序后的评论
+      const commentsRes = await request(app)
+        .get(`/api/documents/${testSortedDocumentId}/comments`);
+
+      expect(commentsRes.status).toBe(200);
+
+      // 评论 1 (like=5) 应该排在评论 2 (like=1) 前面
+      const contents = commentsRes.body.comments.map((c: any) => c.content);
+      expect(contents.indexOf('点赞热门评论')).toBeLessThan(contents.indexOf('低点赞评论'));
+    });
+  });
 });

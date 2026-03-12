@@ -41,7 +41,43 @@ async function runMigration() {
     await pool.query(`
       ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;
     `);
-    logger.info('Auth migration: email_verified + email_otps + avatar_url(TEXT) ready');
+    // 为 SimHash LSH 加 4 个 band 列（如已存在则跳过）
+    await pool.query(`
+      ALTER TABLE content_blocks
+        ADD COLUMN IF NOT EXISTS sh_b0 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS sh_b1 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS sh_b2 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS sh_b3 VARCHAR(4);
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b0 ON content_blocks(sh_b0) WHERE sh_b0 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b1 ON content_blocks(sh_b1) WHERE sh_b1 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b2 ON content_blocks(sh_b2) WHERE sh_b2 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b3 ON content_blocks(sh_b3) WHERE sh_b3 IS NOT NULL;
+    `);
+    // 失败嵌入记录表（用于重试，worker 依赖此表）
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS failed_embeddings (
+        block_hash VARCHAR(64) PRIMARY KEY REFERENCES content_blocks(block_hash) ON DELETE CASCADE,
+        error_message TEXT,
+        retry_count INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry ON failed_embeddings(created_at);
+    `);
+    // 文档级 SimHash（优化三：文档近似去重，跨用户同书识别）
+    await pool.query(`
+      ALTER TABLE documents
+        ADD COLUMN IF NOT EXISTS doc_simhash VARCHAR(16),
+        ADD COLUMN IF NOT EXISTS doc_b0 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS doc_b1 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS doc_b2 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS doc_b3 VARCHAR(4);
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b0 ON documents(doc_b0) WHERE doc_b0 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b1 ON documents(doc_b1) WHERE doc_b1 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b2 ON documents(doc_b2) WHERE doc_b2 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b3 ON documents(doc_b3) WHERE doc_b3 IS NOT NULL;
+    `);
+    logger.info('Auth migration: email_verified + email_otps + avatar_url(TEXT) + failed_embeddings + doc_simhash ready');
 
     // 同步管理员状态
     await syncAdminEmails();
@@ -61,7 +97,15 @@ async function createInitialAdmin() {
   if (!email || !username || !password) return;
 
   const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-  if (existing.rows.length > 0) return; // 已存在，跳过
+
+  if (existing.rows.length > 0) {
+    // 用户已存在：仅确保管理员权限与邮箱验证状态，不覆盖密码（用户可自行修改密码）
+    await pool.query(
+      `UPDATE users SET is_admin = true, email_verified = true WHERE email = $1`,
+      [email]
+    );
+    return;
+  }
 
   // ✅ 使用 bcrypt 哈希管理员密码
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -73,7 +117,7 @@ async function createInitialAdmin() {
   logger.info(`Initial admin created: ${email} (${username})`);
 }
 
-// 从环境变量同步管理员邮箱列表
+// 从环境变量同步管理员邮箱列表（只授权，不自动撤销）
 async function syncAdminEmails() {
   const raw = process.env.ADMIN_EMAILS || '';
   const adminEmails = raw
@@ -83,18 +127,13 @@ async function syncAdminEmails() {
 
   if (adminEmails.length === 0) return;
 
-  // 将列表内邮箱设为管理员
-  await pool.query(
-    `UPDATE users SET is_admin = true WHERE LOWER(email) = ANY($1::text[])`,
-    [adminEmails]
-  );
-  // 将不在列表中的邮箱取消管理员
-  await pool.query(
-    `UPDATE users SET is_admin = false WHERE LOWER(email) != ALL($1::text[])`,
+  const result = await pool.query(
+    `UPDATE users SET is_admin = true WHERE LOWER(email) = ANY($1::text[]) RETURNING email`,
     [adminEmails]
   );
 
-  logger.info(`Admin emails synced: ${adminEmails.join(', ')}`);
+  logger.info(`Admin emails synced (${result.rowCount} granted): ${adminEmails.join(', ')}`);
+  return result.rowCount ?? 0;
 }
 
 runMigration();
@@ -391,6 +430,22 @@ router.put('/change-password', authenticate, async (req, res) => {
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed' });
     logger.error('Change password error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /auth/admin/sync — 管理员触发同步（无需重启）
+router.post('/admin/sync', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.user!;
+    const adminCheck = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
+    if (!adminCheck.rows[0]?.is_admin) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const granted = await syncAdminEmails();
+    res.json({ message: 'Admin emails synced', granted });
+  } catch (err) {
+    logger.error('Admin sync error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

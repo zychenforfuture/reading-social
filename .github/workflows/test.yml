@@ -1,0 +1,73 @@
+name: API Tests
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: collab_comments_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U admin -d collab_comments_test"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=3
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run lint
+        run: pnpm -r lint
+
+      - name: Run tests
+        run: pnpm --filter @collab/api test
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://admin:testpassword@localhost:5433/collab_comments_test
+          REDIS_URL: redis://localhost:6380
+          JWT_SECRET: test-jwt-secret-for-ci-testing-min-32-chars
+
+      - name: Run coverage
+        run: pnpm --filter @collab/api test --coverage
+
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@master
+        with:
+          file: packages/api/coverage/lcov.info

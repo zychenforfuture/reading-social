@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ProfilePage from './pages/ProfilePage';
-import ProfileMessagesPage from './pages/ProfileMessages';
+import ProfileMessages from './pages/ProfileMessages';
 
 function App() {
   return (
@@ -18,7 +18,7 @@ function App() {
         <Route index element={<HomePage />} />
         <Route path="documents/:id" element={<DocumentPage />} />
         <Route path="profile" element={<ProfilePage />} />
-        <Route path="profile/messages" element={<ProfileMessagesPage />} />
+        <Route path="profile/messages" element={<ProfileMessages />} />
       </Route>
     </Routes>
   );

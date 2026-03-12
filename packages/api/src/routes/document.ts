@@ -125,12 +125,20 @@ router.get('/:id/comments', optionalAuth, async (req, res) => {
     const { id } = req.params;
 
     // 获取文档所有块（含原文，用于跨文档句子匹配）
+    // 去重文档通过 COALESCE 读 canonical 的块
+    const effectiveDocId = await pool.query(
+      `SELECT COALESCE(canonical_document_id, id) AS eid FROM documents WHERE id = $1`,
+      [id]
+    );
+    if (effectiveDocId.rows.length === 0) {
+      return res.json({ comments: [], blockCommentCount: {} });
+    }
     const blocksResult = await pool.query(
       `SELECT db.block_hash, cb.raw_content
        FROM document_blocks db
        JOIN content_blocks cb ON db.block_hash = cb.block_hash
        WHERE db.document_id = $1`,
-      [id]
+      [effectiveDocId.rows[0].eid]
     );
 
     if (blocksResult.rows.length === 0) {

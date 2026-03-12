@@ -18,6 +18,7 @@ packages/web/vite.config.js
 .env
 .env.local
 .env.production
+.env.development
 .env.*.local
 packages/api/.env
 packages/web/.env
@@ -43,3 +44,7 @@ coverage/
 
 # 数据库 / 缓存持久化数据
 volumes/
+
+# 构建缓存 / 备份文件
+**/.cache/
+*.bak

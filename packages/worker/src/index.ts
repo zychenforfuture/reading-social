@@ -3,6 +3,8 @@ import { createHash } from 'crypto';
 import { pool } from './db/database.js';
 import { logger } from './utils/logger.js';
 import { computeSimHash, hammingDistance } from './utils/simhash.js';
+import { generateEmbedding } from './utils/embedding.js';
+import { storeEmbedding, findSimilarEmbeddings, checkEmbeddingExists, initializeQdrantCollection } from './db/qdrant-client.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const url = new URL(redisUrl);
@@ -13,33 +15,41 @@ const connection = {
   password,
 };
 
+// 初始化 Qdrant 集合（384 维，all-MiniLM-L6-v2）
+await initializeQdrantCollection();
+
 // 文档处理队列
 const documentQueue = new Queue('document-processing', { connection });
 
 /**
- * 查找与给定 simHash 海明距离 <= threshold 的已有块
+ * 用 LSH band 查找与给定 simHash 海明距离 <= threshold 的已有块
+ * 原理：把 64 位抆分成 4 段，相似指纹必有至少 1 段相同，直接用索引命中候选集
  */
 async function findSimilarBlocks(
   simHash: string,
   threshold = 3,
 ): Promise<{ block_hash: string; similarity_hash: string; distance: number }[]> {
+  const b0 = simHash.slice(0, 4);
+  const b1 = simHash.slice(4, 8);
+  const b2 = simHash.slice(8, 12);
+  const b3 = simHash.slice(12, 16);
+
+  // 任意一段相同即为候选（避免全表扫描）
   const result = await pool.query(
-    'SELECT block_hash, similarity_hash FROM content_blocks'
+    `SELECT DISTINCT block_hash, similarity_hash FROM content_blocks
+     WHERE similarity_hash ~ '^[0-9a-f]{16}$'
+       AND (sh_b0 = $1 OR sh_b1 = $2 OR sh_b2 = $3 OR sh_b3 = $4)`,
+    [b0, b1, b2, b3]
   );
 
   const similar: { block_hash: string; similarity_hash: string; distance: number }[] = [];
-
   for (const row of result.rows) {
+    if (typeof row.similarity_hash !== 'string' || row.similarity_hash.length !== 16) continue;
     const distance = hammingDistance(simHash, row.similarity_hash);
     if (distance <= threshold && distance > 0) {
-      similar.push({
-        block_hash: row.block_hash,
-        similarity_hash: row.similarity_hash,
-        distance,
-      });
+      similar.push({ block_hash: row.block_hash, similarity_hash: row.similarity_hash, distance });
     }
   }
-
   return similar;
 }
 
@@ -48,6 +58,13 @@ async function findSimilarBlocks(
  */
 function calculateSimilarityScore(distance: number): number {
   return Number((1 - distance / 64).toFixed(4));
+}
+
+/**
+ * 计算向量相似度分数
+ */
+function calculateVectorSimilarityScore(score: number): number {
+  return Number(score.toFixed(4));
 }
 
 // 内容指纹 Worker
@@ -90,23 +107,38 @@ const fingerprintWorker = new Worker(
 
       const BATCH = 500;
 
-      // 批量插入 content_blocks（已去重）
+      // 批量插入 content_blocks，通过 RETURNING + xmax 识别真正新增的块
+      // xmax = 0 表示本次是 INSERT（新块）；xmax != 0 表示是 ON CONFLICT UPDATE（旧块）
+      const newBlockHashes = new Set<string>();
       for (let start = 0; start < uniqueBlocks.length; start += BATCH) {
         const batch = uniqueBlocks.slice(start, start + BATCH);
         const placeholders = batch.map((_: unknown, j: number) => {
-          const b = j * 4;
-          return `($${b+1},$${b+2},$${b+3},$${b+4})`;
+          const b = j * 8;
+          return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8})`;
         }).join(',');
         const values = batch.flatMap((b) =>
-          [b.hash, b.content, b.content.length, b.simHash]
+          [b.hash, b.content, b.content.length, b.simHash,
+           b.simHash.slice(0, 4), b.simHash.slice(4, 8),
+           b.simHash.slice(8, 12), b.simHash.slice(12, 16)]
         );
-        await pool.query(
-          `INSERT INTO content_blocks (block_hash, raw_content, word_count, similarity_hash)
+        const result = await pool.query(
+          `INSERT INTO content_blocks (block_hash, raw_content, word_count, similarity_hash, sh_b0, sh_b1, sh_b2, sh_b3)
            VALUES ${placeholders}
-           ON CONFLICT (block_hash) DO UPDATE SET occurrence_count = content_blocks.occurrence_count + 1, updated_at = NOW()`,
+           ON CONFLICT (block_hash) DO UPDATE SET occurrence_count = content_blocks.occurrence_count + 1, updated_at = NOW()
+           RETURNING block_hash, (xmax = 0) AS is_new`,
           values
         );
+        for (const row of result.rows) {
+          if (row.is_new) newBlockHashes.add(row.block_hash);
+        }
       }
+      logger.info(`Document ${documentId}: ${newBlockHashes.size}/${uniqueBlocks.length} blocks are new (${uniqueBlocks.length - newBlockHashes.size} skipped SimHash)`);
+
+      // 只对真正新增的块做 SimHash 相似查找（旧块已有 similar_blocks 记录）
+      const newBlocks = uniqueBlocks.filter(b => newBlockHashes.has(b.hash));
+
+      // 计算全文 doc_simhash（存入文档元数据，供日后分析用；不做 near-dedup，每个文档保留完整独立内容）
+      const docSimHash = computeSimHash(content);
 
       // 批量插入 document_blocks
       for (let start = 0; start < blockData.length; start += BATCH) {
@@ -125,12 +157,16 @@ const fingerprintWorker = new Worker(
         );
       }
 
-      // 为新增的块计算相似块关系
-      logger.info(`Calculating similar blocks for document ${documentId}...`);
-      const SIMILAR_THRESHOLD = 3; // 海明距离阈值
+      // 仅对新块计算 SimHash 相似关系（LSH band 查询）
+      logger.info(`Calculating similar blocks for document ${documentId}... (${newBlocks.length} new blocks)`);
+      const SIMILAR_THRESHOLD = 3;
+      const BLOCK_PROCESS_BATCH = 500;
+      let processedCount = 0;
 
-      for (const block of uniqueBlocks) {
-        // 查询已有相似块
+      for (const block of newBlocks) {
+        processedCount++;
+
+        // SimHash 相似块（LSH 索引命中）
         const similar = await findSimilarBlocks(block.simHash, SIMILAR_THRESHOLD);
 
         if (similar.length > 0) {
@@ -140,7 +176,6 @@ const fingerprintWorker = new Worker(
 
           for (const s of similar) {
             const score = calculateSimilarityScore(s.distance);
-            // 双向关系各占一个 VALUES 占位，参数必须与 values 数组严格对齐
             placeholders.push(`($${paramIndex},$${paramIndex + 1},$${paramIndex + 2},$${paramIndex + 3})`);
             placeholders.push(`($${paramIndex + 4},$${paramIndex + 5},$${paramIndex + 6},$${paramIndex + 7})`);
             values.push(block.hash, s.block_hash, score, 'simhash');
@@ -158,15 +193,98 @@ const fingerprintWorker = new Worker(
             logger.info(`Found ${similar.length} similar blocks for ${block.hash.substring(0, 8)}...`);
           }
         }
+
+        // 定期记录进度
+        if (processedCount % BLOCK_PROCESS_BATCH === 0) {
+          logger.info(`SimHash blocks ${processedCount}/${newBlocks.length}...`);
+        }
       }
 
-      // 更新文档状态，清空 content 节省存储
-      await pool.query(
-        'UPDATE documents SET word_count = $1, block_count = $2, status = $3, content = NULL WHERE id = $4',
-        [content.length, blocks.length, 'ready', documentId]
-      );
+      logger.info(`SimHash processing done for document ${documentId}`);
 
-      logger.info(`Document ${documentId} processed successfully`);
+      // ─── SimHash 完成，立即标记文档为就绪（带 doc_simhash）───
+      await pool.query(
+        `UPDATE documents
+         SET word_count = $1, block_count = $2, status = $3, content = NULL,
+             doc_simhash = $4, doc_b0 = $5, doc_b1 = $6, doc_b2 = $7, doc_b3 = $8
+         WHERE id = $9`,
+        [content.length, blocks.length, 'ready',
+         docSimHash, docSimHash.slice(0, 4), docSimHash.slice(4, 8),
+         docSimHash.slice(8, 12), docSimHash.slice(12, 16),
+         documentId]
+      );
+      logger.info(`Document ${documentId} marked as ready (${uniqueBlocks.length} unique blocks)`);
+
+      // ─── Embedding 后台异步，同样只对新块计算 ───
+      setImmediate(async () => {
+        const MAX_EMBED_RETRIES = 3;
+        let embeddedCount = 0;
+        for (const block of newBlocks) {
+          // 跳过已存在于 Qdrant 的块（重复文档/重试场景）
+          if (await checkEmbeddingExists(block.hash)) {
+            embeddedCount++;
+            continue;
+          }
+
+          let retries = 0;
+          while (retries < MAX_EMBED_RETRIES) {
+            try {
+              const embedding = await generateEmbedding(block.content);
+              await storeEmbedding(block.hash, embedding);
+              embeddedCount++;
+              logger.debug(`Stored embedding for block ${block.hash.substring(0, 8)}...`);
+
+              // 查找向量相似块（只存 SimHash 未覆盖的语义相似对，避免冗余）
+              const vectorSimilar = await findSimilarEmbeddings(embedding);
+              if (vectorSimilar.length > 0) {
+                // 取出本块 SimHash 已记录的相似 hash 集合，用于去重
+                const simhashCoveredResult = await pool.query(
+                  `SELECT similar_hash FROM similar_blocks WHERE block_hash = $1 AND algorithm = 'simhash'`,
+                  [block.hash]
+                );
+                const simhashCovered = new Set(simhashCoveredResult.rows.map((r: { similar_hash: string }) => r.similar_hash));
+
+                const vectorValues: any[] = [];
+                const vectorPlaceholders: string[] = [];
+                let vp = 1;
+                for (const vs of vectorSimilar) {
+                  if (vs.block_hash === block.hash) continue;
+                  if (simhashCovered.has(vs.block_hash)) continue; // SimHash 已覆盖，跳过
+                  const score = calculateVectorSimilarityScore(vs.score);
+                  vectorPlaceholders.push(`($${vp},$${vp+1},$${vp+2},$${vp+3})`);
+                  vectorPlaceholders.push(`($${vp+4},$${vp+5},$${vp+6},$${vp+7})`);
+                  vectorValues.push(block.hash, vs.block_hash, score, 'embedding');
+                  vectorValues.push(vs.block_hash, block.hash, score, 'embedding');
+                  vp += 8;
+                }
+                if (vectorPlaceholders.length > 0) {
+                  await pool.query(
+                    `INSERT INTO similar_blocks (block_hash, similar_hash, similarity_score, algorithm)
+                     VALUES ${vectorPlaceholders.join(',')}
+                     ON CONFLICT (block_hash, similar_hash, algorithm) DO UPDATE SET similarity_score = EXCLUDED.similarity_score`,
+                    vectorValues
+                  );
+                }
+              }
+              break;
+            } catch (embedError) {
+              retries++;
+              if (retries < MAX_EMBED_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries)));
+              } else {
+                logger.error(`Embedding permanently failed for block ${block.hash.substring(0, 8)}…:`, embedError);
+                try {
+                  await pool.query(
+                    'INSERT INTO failed_embeddings (block_hash, error_message, retry_count) VALUES ($1, $2, $3) ON CONFLICT (block_hash) DO UPDATE SET error_message = EXCLUDED.error_message, retry_count = EXCLUDED.retry_count, updated_at = NOW()',
+                    [block.hash, embedError instanceof Error ? embedError.message : String(embedError), retries]
+                  );
+                } catch { /* ignore */ }
+              }
+            }
+          }
+        }
+        logger.info(`Background embedding done for document ${documentId}: ${embeddedCount}/${newBlocks.length} new blocks`);
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(`Error processing document ${documentId}: ${msg}`);
@@ -177,7 +295,12 @@ const fingerprintWorker = new Worker(
       throw error;
     }
   },
-  { connection, concurrency: 1 } // 降低并发，避免相似计算时数据库竞争
+  {
+    connection,
+    concurrency: 4,         // 并发处理 4 个文档任务
+    lockDuration: 600000,   // 10 分钟锁超时
+    lockRenewTime: 60000,
+  }
 );
 
 fingerprintWorker.on('completed', (job) => {

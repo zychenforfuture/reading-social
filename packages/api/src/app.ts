@@ -10,7 +10,7 @@ import { authRoutes } from './routes/auth.js';
 import { documentRoutes } from './routes/document.js';
 import { commentRoutes } from './routes/comment.js';
 import { blockRoutes } from './routes/block.js';
-import { notificationRoutes } from './routes/notifications.js';
+import { notificationRoutes } from './routes/notification.js';
 import { swaggerUi, swaggerSpec } from './swagger.js';
 
 const app: Express = express();
