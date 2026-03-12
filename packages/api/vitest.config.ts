@@ -8,6 +8,7 @@ export default defineConfig({
     testTimeout: 60000, // 60 秒超时（集成测试需要更长时间）
     coverage: {
       enabled: false,
+      reporter: ['text', 'lcov', 'html', 'clover'],
     },
   },
 });
