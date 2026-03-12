@@ -21,13 +21,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # Redis - 缓存和消息队列
   redis:
     image: redis:7-alpine
     container_name: collab-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-CollabDev2026!}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-CollabDev2026!} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -37,6 +45,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
   # Qdrant - 向量数据库
   qdrant:
@@ -55,6 +71,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # API 服务
   api:
@@ -64,12 +88,12 @@ services:
     container_name: collab-api
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
       DATABASE_URL: postgresql://admin:${DB_PASSWORD:-CollabDev2026!}@postgres:5432/collab_comments
       REDIS_URL: redis://:${REDIS_PASSWORD:-CollabDev2026!}@redis:6379
       QDRANT_URL: http://qdrant:6333
-      JWT_SECRET: ${JWT_SECRET:-CollabJWTSecret2026!}
+      JWT_SECRET: ${JWT_SECRET}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
     ports:
       - "3000:3000"
@@ -80,6 +104,19 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Worker 服务
   worker:
@@ -89,7 +126,7 @@ services:
     container_name: collab-worker
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://admin:${DB_PASSWORD:-CollabDev2026!}@postgres:5432/collab_comments
       REDIS_URL: redis://:${REDIS_PASSWORD:-CollabDev2026!}@redis:6379
       QDRANT_URL: http://qdrant:6333
@@ -100,6 +137,19 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Web 前端服务
   web:
@@ -114,6 +164,19 @@ services:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - api
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 
 networks:

@@ -5,6 +5,7 @@
   "description": "跨文档协同评论系统 - 评论跟着内容走",
   "scripts": {
     "build": "pnpm -r build",
+    "dev:all": "docker compose up -d postgres redis qdrant && sh -c 'set -o allexport; [ -f .env ] && source .env; set +o allexport; pnpm --filter @collab/api dev & pnpm --filter @collab/worker dev & pnpm --filter @collab/web dev; wait'",
     "build:api": "pnpm --filter @collab/api build",
     "build:web": "pnpm --filter @collab/web build",
     "lint": "pnpm -r lint",

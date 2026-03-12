@@ -76,12 +76,31 @@ const router: Router = Router();
 // ─── SSE 客户端注册表 ────────────────────────────────────────────
 // documentId → Set<Response>（存每个打开文档的长连接）
 const sseClients = new Map<string, Set<Response>>();
-// 跟踪每个连接的心跳定时器，用于清理
+// 跟踪每个连接的心跳定时器 + 连接时间，用于清理
 const sseHeartbeats = new WeakMap<Response, NodeJS.Timeout>();
+const sseConnectionTime = new WeakMap<Response, number>();
+// 每文档最大连接数上限
+const MAX_CONNECTIONS_PER_DOCUMENT = 100;
+// 连接最长存活时间（30 分钟）
+const MAX_CONNECTION_AGE_MS = 30 * 60 * 1000;
+// 空闲超时（10 分钟无心跳）
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+// 心跳响应跟踪
+const sseLastHeartbeat = new WeakMap<Response, number>();
 
-function addSseClient(documentId: string, res: Response): void {
+function addSseClient(documentId: string, res: Response): boolean {
   if (!sseClients.has(documentId)) sseClients.set(documentId, new Set());
-  sseClients.get(documentId)!.add(res);
+  const clients = sseClients.get(documentId)!;
+
+  // 连接数上限保护
+  if (clients.size >= MAX_CONNECTIONS_PER_DOCUMENT) {
+    return false;
+  }
+
+  clients.add(res);
+  sseConnectionTime.set(res, Date.now());
+  sseLastHeartbeat.set(res, Date.now());
+  return true;
 }
 
 function removeSseClient(documentId: string, res: Response): void {
@@ -102,18 +121,42 @@ function broadcastToDocument(documentId: string, data: object): void {
 }
 
 /**
- * 清理断开的 SSE 客户端（兜底机制）
- * 每 5 分钟运行一次，清理 writableEnded 的连接
+ * 清理断开的 SSE 客户端（激进的清理策略）
+ * 每 1 分钟运行一次，清理：
+ * 1. writableEnded 的连接
+ * 2. 超过最大存活时间的连接
+ * 3. 超过空闲超时的连接
  */
 function cleanupTimeout(): void {
   let cleanedCount = 0;
+  const now = Date.now();
+
   for (const [documentId, clients] of sseClients.entries()) {
     const toRemove: Response[] = [];
     for (const res of clients) {
+      // 1. 已断开的连接
       if (res.writableEnded) {
         toRemove.push(res);
+        continue;
+      }
+
+      // 2. 超过最大存活时间
+      const connectTime = sseConnectionTime.get(res);
+      if (connectTime && now - connectTime > MAX_CONNECTION_AGE_MS) {
+        toRemove.push(res);
+        logger.info(`SSE forced disconnect: doc=${documentId.substring(0, 8)}… (max age exceeded)`);
+        continue;
+      }
+
+      // 3. 空闲超时（超过 10 分钟未收到心跳响应）
+      const lastHeartbeat = sseLastHeartbeat.get(res);
+      if (lastHeartbeat && now - lastHeartbeat > IDLE_TIMEOUT_MS) {
+        toRemove.push(res);
+        logger.info(`SSE idle timeout: doc=${documentId.substring(0, 8)}…`);
+        continue;
       }
     }
+
     for (const res of toRemove) {
       const heartbeat = sseHeartbeats.get(res);
       if (heartbeat) clearInterval(heartbeat);
@@ -121,14 +164,15 @@ function cleanupTimeout(): void {
       cleanedCount++;
     }
   }
+
   if (cleanedCount > 0) {
-    logger.info(`SSE timeout cleanup: removed ${cleanedCount} stale clients`);
+    logger.info(`SSE cleanup: removed ${cleanedCount} stale clients`);
   }
 }
 
-// 启动全局定期清理（每 5 分钟）
-setInterval(() => cleanupTimeout(), 5 * 60 * 1000);
-logger.info('SSE timeout cleanup scheduled every 5 minutes');
+// 启动全局定期清理（每 1 分钟）
+setInterval(() => cleanupTimeout(), 60 * 1000);
+logger.info('SSE cleanup scheduled every 1 minute');
 // ────────────────────────────────────────────────────────────────
 
 const commentSchema = z.object({
@@ -145,6 +189,13 @@ const commentSchema = z.object({
 router.get('/stream/:documentId', (req: Request, res: Response) => {
   const documentId = String(req.params['documentId'] ?? '');
 
+  // 尝试添加客户端，检查是否超过连接数上限
+  const added = addSseClient(documentId, res);
+  if (!added) {
+    res.status(503).json({ error: 'Too many connections to this document' });
+    return;
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -154,12 +205,17 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
   // 初始心跳确认连接建立
   res.write(': connected\n\n');
 
-  addSseClient(documentId, res);
   logger.info(`SSE connected: doc=${documentId.substring(0, 8)}… clients=${sseClients.get(documentId)?.size}`);
 
   // 每 30s 发心跳，防止 nginx/负载均衡器因空闲超时断开连接
   const heartbeat = setInterval(() => {
-    try { res.write(': ping\n\n'); } catch { clearInterval(heartbeat); }
+    try {
+      res.write(': ping\n\n');
+      // 记录心跳时间
+      sseLastHeartbeat.set(res, Date.now());
+    } catch {
+      clearInterval(heartbeat);
+    }
   }, 30000);
   sseHeartbeats.set(res, heartbeat);
 
@@ -328,9 +384,13 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     logger.info(`Comment created: ${comment.id} on block ${blockHash.substring(0, 8)}...`);
 
+    // 广播到所有包含该 block 的文档（包含去重引用文档）
     try {
       const docRows = await pool.query(
-        'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',
+        `SELECT DISTINCT d.id AS document_id
+         FROM document_blocks db
+         JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
+         WHERE db.block_hash = $1`,
         [blockHash]
       );
       for (const row of docRows.rows) {
@@ -508,10 +568,13 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
 
       await client.query('COMMIT');
 
-      // 广播到所有包含该 block 的文档（跨文档实时同步）
+      // 广播到所有包含该 block 的文档（包含去重引用文档）
       try {
         const docRows = await pool.query(
-          'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',
+          `SELECT DISTINCT d.id AS document_id
+           FROM document_blocks db
+           JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
+           WHERE db.block_hash = $1`,
           [blockHash]
         );
         for (const row of docRows.rows) {
