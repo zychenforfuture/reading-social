@@ -33,7 +33,22 @@ trap cleanup EXIT
 
 # 步骤 1: 启动测试服务
 echo -e "${YELLOW}[1/4] 启动测试服务 (PostgreSQL + Redis + Qdrant)...${NC}"
-docker compose -f docker-compose.test.yml up -d > /dev/null 2>&1
+# 检查是否安装并能访问 Docker
+if ! command -v docker >/dev/null 2>&1; then
+  echo -e "${RED}✗ 未检测到 Docker，请先安装并启动 Docker Desktop / Docker Engine。"
+  echo -e "   参考：https://docs.docker.com/get-docker/"
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo -e "${RED}✗ Docker 无法访问（daemon 未启动或无权限）。请确保 Docker 已启动并且当前用户有权限运行 docker。" 
+  exit 1
+fi
+
+docker compose -f docker-compose.test.yml up -d > /dev/null 2>&1 || {
+  echo -e "${RED}✗ 启动 docker compose 服务失败，请查看 docker-compose.test.yml 配置并手动运行。";
+  exit 1;
+}
 
 # 等待服务就绪
 echo -e "${YELLOW}      等待服务启动...${NC}"

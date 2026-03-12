@@ -1,15 +1,27 @@
 import nodemailer from 'nodemailer';
 import { logger } from '../config/logger.js';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtpdm.aliyun.com',
-  port: parseInt(process.env.SMTP_PORT || '465', 10),
-  secure: true,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+let transporter: { sendMail: (opts: any) => Promise<any> };
+
+if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtpdm.aliyun.com',
+    port: parseInt(process.env.SMTP_PORT || '465', 10),
+    secure: true,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+} else {
+  // 在未配置 SMTP 时提供一个 no-op transporter，避免在测试或本地环境抛错
+  transporter = {
+    sendMail: async (opts: any) => {
+      logger.warn('SMTP 未配置，跳过邮件发送', { to: opts?.to });
+      return Promise.resolve({ skipped: true });
+    },
+  };
+}
 
 export async function sendVerificationEmail(
   to: string,

@@ -5,6 +5,7 @@ import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { authenticate, optionalAuth } from '../middleware/auth.js';
 import { createNotification } from '../utils/notifications.js';
+import { cleanText } from '../utils/clean.js';
 
 /** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
 function normalizeSentence(text: string): string {
@@ -298,7 +299,11 @@ router.get('/block/:hash', optionalAuth, async (req, res) => {
 // 创建评论（根评论或回复）
 router.post('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const { content, blockHash, rootId, replyToUserId, selectedText } = commentSchema.parse(req.body);
+    let { content, blockHash, rootId, replyToUserId, selectedText } = commentSchema.parse(req.body);
+
+    // 清理输入以去除 null 字节和不可见控制字符，限制长度
+    content = cleanText(content, 5000);
+    if (typeof selectedText === 'string') selectedText = cleanText(selectedText, 500);
 
     const { userId } = req.user!;
 
@@ -452,10 +457,12 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 router.patch('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    const { content, isResolved } = z.object({
+    const parsed = z.object({
       content: z.string().min(1).max(5000).optional(),
       isResolved: z.boolean().optional(),
     }).parse(req.body);
+    let { content, isResolved } = parsed;
+    if (content !== undefined) content = cleanText(content, 5000);
 
     const { userId, isAdmin } = req.user!;
 

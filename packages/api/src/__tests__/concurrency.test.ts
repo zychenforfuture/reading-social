@@ -140,7 +140,7 @@ describe('Concurrency Tests - 并发测试', () => {
       const commentId = createRes.body.comment.id;
 
       // 模拟 10 个并发点赞
-      const likePromises = Array.from({ length: 10 }, (_, i) =>
+      const likePromises = Array.from({ length: 10 }, async (_, i) =>
         request(await import('../app.js').then(m => m.default))
           .post(`/api/comments/${commentId}/like`)
           .set('Authorization', `Bearer ${i % 2 === 0 ? authToken1 : authToken2}`)
@@ -162,7 +162,7 @@ describe('Concurrency Tests - 并发测试', () => {
   describe('并发登录压力测试', () => {
     it('应该正确处理 100 并发登录请求', async () => {
       // 模拟 100 个并发登录
-      const loginPromises = Array.from({ length: 100 }, () =>
+      const loginPromises = Array.from({ length: 100 }, async () =>
         request(await import('../app.js').then(m => m.default))
           .post('/api/auth/login')
           .send({ email: TEST_EMAIL_1, password: TEST_PASSWORD })
@@ -187,7 +187,7 @@ describe('Concurrency Tests - 并发测试', () => {
   describe('并发文档上传压力测试', () => {
     it('应该正确处理 50 并发文档上传', async () => {
       // 模拟 50 个并发上传
-      const uploadPromises = Array.from({ length: 50 }, (_, i) =>
+      const uploadPromises = Array.from({ length: 50 }, async (_, i) =>
         request(await import('../app.js').then(m => m.default))
           .post('/api/documents')
           .set('Authorization', `Bearer ${authToken1}`)

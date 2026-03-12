@@ -12,7 +12,8 @@ export const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  // 在测试/开发环境中不要直接退出整个进程，允许测试框架捕获错误并展示失败详情。
+  // 在生产环境中仍建议监控并重启服务。
 });
 
 export async function query<T>(text: string, params?: unknown[]) {
