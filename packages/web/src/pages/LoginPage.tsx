@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
+  const [hasAttemptedLogin, setHasAttemptedLogin] = useState(false);
 
   const successMsg = (location.state as any)?.registered
     ? '注册成功，请登录'
@@ -26,6 +27,12 @@ export default function LoginPage() {
       navigate('/');
     },
   });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setHasAttemptedLogin(true);
+    mutation.mutate();
+  };
 
   const errorMsg = (() => {
     const msg = (mutation.error as any)?.message || '';
@@ -46,12 +53,12 @@ export default function LoginPage() {
           <p className="text-sm text-green-600 text-center">{successMsg}</p>
         )}
 
-        {mutation.isError && (
+        {hasAttemptedLogin && mutation.isError && (
           <p className="text-sm text-red-500 text-center -mt-2">{errorMsg}</p>
         )}
 
         <form
-          onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}
+          onSubmit={handleSubmit}
           className="space-y-3"
         >
           <input

@@ -4,6 +4,7 @@ import { useUserStore } from '../stores/userStore';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Trash2, Plus, Upload } from 'lucide-react';
 import { useState, useRef } from 'react';
+import * as React from 'react';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -58,6 +59,19 @@ export default function HomePage() {
     createMutation.mutate({ title: newDocTitle, content: newDocContent });
   };
 
+  // 清理 Worker
+  const cleanupWorker = () => {
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
+  };
+
+  // 组件卸载时清理 Worker
+  React.useEffect(() => {
+    return () => cleanupWorker();
+  }, []);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -78,7 +92,7 @@ export default function HomePage() {
     e.target.value = '';
 
     // 终止上一个 worker（如果有）
-    workerRef.current?.terminate();
+    cleanupWorker();
 
     const worker = new Worker(
       new URL('../workers/fileProcessor.worker.ts', import.meta.url),
@@ -93,20 +107,19 @@ export default function HomePage() {
         setReadProgress(msg.progress as number);
       } else if (msg.type === 'DONE') {
         setReadProgress(100);
-        worker.terminate();
-        workerRef.current = null;
+        cleanupWorker();
         createMutation.mutate({ title: msg.title as string, content: msg.content as string });
       } else if (msg.type === 'ERROR') {
         setUploadError(`文件读取失败：${msg.message}`);
         setReadProgress(null);
-        worker.terminate();
-        workerRef.current = null;
+        cleanupWorker();
       }
     };
 
     worker.onerror = () => {
       setUploadError('文件读取失败，请重试');
       setReadProgress(null);
+      cleanupWorker();
     };
 
     worker.postMessage({ type: 'PROCESS_FILE', file });

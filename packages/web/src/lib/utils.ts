@@ -35,11 +35,15 @@ export const api: {
   baseURL: import.meta.env?.VITE_API_URL || '/api',
 
   async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    // 从 localStorage 读取持久化的 token
+    // 从 localStorage 读取持久化的 token（Zustand persist 格式）
     let token: string | null = null;
     try {
       const stored = localStorage.getItem('collab-auth');
-      if (stored) token = JSON.parse(stored)?.state?.token ?? null;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Zustand persist v3 存储格式：{ state: { token, user, ... } }
+        token = parsed?.state?.token ?? parsed?.token ?? null;
+      }
     } catch {}
 
     const headers: Record<string, string> = {
@@ -55,7 +59,7 @@ export const api: {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error?.error || `HTTP ${response.status}`);
+      throw new Error(error?.error || `HTTP ${response.status}: ${error?.message || ''}`);
     }
 
     return response.json();

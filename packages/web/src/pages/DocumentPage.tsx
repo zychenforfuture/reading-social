@@ -1,258 +1,16 @@
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, BookOpen, MessageSquare, ThumbsUp, SlidersHorizontal } from 'lucide-react';
-import { api, type ContentBlock, type Comment, type Document as DocEntry, timeAgo, cn } from '../lib/utils';
-import Editor, { type ReadingStyle } from '../components/Editor';
-import CommentPanel, { Avatar, ReplySection } from '../components/CommentPanel';
+import { cn } from '../lib/utils';
+import { api, type ContentBlock, type Comment, type Document as DocEntry } from '../lib/utils';
+import CommentPanel from '../components/CommentPanel';
 import TableOfContents, { type Chapter } from '../components/TableOfContents';
-
-// ─── 阅读设置 ───────────────────────────────────────────────
-const BG_THEMES: { key: string; label: string; bgColor: string; textColor: string }[] = [
-  { key: 'white',     label: '默认',   bgColor: '#ffffff', textColor: '#1a1a1a' },
-  { key: 'parchment', label: '羊皮纸', bgColor: '#f4ecd8', textColor: '#5a3e28' },
-  { key: 'eye',       label: '护眼',   bgColor: '#cce8c4', textColor: '#293d29' },
-  { key: 'dark',      label: '深色',   bgColor: '#1c1c1e', textColor: '#a8a8a8' },
-];
-const FONT_SIZES = [15, 16, 17, 18, 19, 20];
-const LINE_HEIGHTS = [1.6, 1.8, 2.0, 2.2];
-
-const SETTINGS_KEY = 'reading-settings';
-function loadSettings(): { fontSize: number; lineHeight: number; bgKey: string } {
-  try {
-    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    return {
-      fontSize: FONT_SIZES.includes(s.fontSize) ? s.fontSize : 17,
-      lineHeight: LINE_HEIGHTS.includes(s.lineHeight) ? s.lineHeight : 2.0,
-      bgKey: BG_THEMES.find(t => t.key === s.bgKey) ? s.bgKey : 'white',
-    };
-  } catch { return { fontSize: 17, lineHeight: 2.0, bgKey: 'white' }; }
-}
-function saveSettings(s: { fontSize: number; lineHeight: number; bgKey: string }) {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
-}
-import { useUserStore } from '../stores/userStore';
-
-// 章节标题检测正则
-const CHAPTER_RE = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+)/i;
-
-/** 从 blocks 中提取章节结构 */
-function buildChapters(blocks: ContentBlock[], blockCommentCount: Record<string, number>): Chapter[] {
-  if (blocks.length === 0) return [];
-
-  // 找到所有章节标题块的索引
-  const headingIndexes: number[] = [];
-  blocks.forEach((b, i) => {
-    const firstLine = b.raw_content.split('\n')[0]?.trim() ?? '';
-    if (CHAPTER_RE.test(firstLine)) headingIndexes.push(i);
-  });
-
-  // 如果检测到至少 1 个章节标题，按标题切分
-  if (headingIndexes.length >= 1) {
-    const chapters: Chapter[] = [];
-
-    // 第一章标题前若有内容，单独作为"前言"章节
-    if (headingIndexes[0] > 0) {
-      const preBlocks = blocks.slice(0, headingIndexes[0]);
-      const commentCount = preBlocks.reduce((s, b) => s + (blockCommentCount[b.block_hash] || 0), 0);
-      chapters.push({ index: 0, title: '前言', blockStart: 0, blockCount: headingIndexes[0], commentCount });
-    }
-
-    headingIndexes.forEach((start, idx) => {
-      const end = headingIndexes[idx + 1] ?? blocks.length;
-      const title = blocks[start]!.raw_content.split('\n')[0]!.trim();
-      const chBlocks = blocks.slice(start, end);
-      const commentCount = chBlocks.reduce((s, b) => s + (blockCommentCount[b.block_hash] || 0), 0);
-      chapters.push({ index: chapters.length, title, blockStart: start, blockCount: end - start, commentCount });
-    });
-
-    return chapters.map((c, i) => ({ ...c, index: i }));
-  }
-
-  // 否则按每 20 块自动分章
-  const BLOCKS_PER_CHAPTER = 20;
-  const chapters: Chapter[] = [];
-  let i = 0;
-  while (i < blocks.length) {
-    const start = i;
-    const end = Math.min(i + BLOCKS_PER_CHAPTER, blocks.length);
-    const chBlocks = blocks.slice(start, end);
-    const commentCount = chBlocks.reduce((s, b) => s + (blockCommentCount[b.block_hash] || 0), 0);
-    chapters.push({
-      index: chapters.length,
-      title: `第 ${chapters.length + 1} 章（第 ${start + 1}–${end} 段）`,
-      blockStart: start,
-      blockCount: end - start,
-      commentCount,
-    });
-    i = end;
-  }
-  return chapters;
-}
-
-// -------- 本章评论区（页面底部内联展示）--------
-interface ChapterCommentsProps {
-  documentId: string;
-  chapterBlocks: ContentBlock[];
-  comments: Comment[];
-  onSelectBlock: (hash: string, text: string) => void;
-}
-
-function ChapterComments({ documentId, chapterBlocks, comments, onSelectBlock }: ChapterCommentsProps) {
-  const queryClient = useQueryClient();
-  const { user } = useUserStore();
-
-  type CommentsCache = { comments: Comment[]; blockCommentCount: Record<string, number> };
-
-  // 点赞（乐观更新 + 快照回滚）
-  const likeMutation = useMutation({
-    mutationFn: (commentId: string) => api.likeComment(commentId),
-    onMutate: async (commentId: string) => {
-      await queryClient.cancelQueries({ queryKey: ['document-comments', documentId] });
-      const previous = queryClient.getQueryData<CommentsCache>(['document-comments', documentId]);
-      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          comments: old.comments.map((c) =>
-            c.id === commentId
-              ? { ...c, liked_by_me: !c.liked_by_me, like_count: c.liked_by_me ? c.like_count - 1 : c.like_count + 1 }
-              : c
-          ),
-        };
-      });
-      return { previous };
-    },
-    onError: (_err, _id, context) => {
-      if (context?.previous) queryClient.setQueryData(['document-comments', documentId], context.previous);
-    },
-    onSuccess: (data, commentId) => {
-      queryClient.setQueryData<CommentsCache>(['document-comments', documentId], (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          comments: old.comments.map((c) =>
-            c.id === commentId ? { ...c, liked_by_me: data.liked, like_count: data.likeCount } : c
-          ),
-        };
-      });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteComment(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['document-comments', documentId] }),
-  });
-
-  const blockHashSet = new Set(chapterBlocks.map(b => b.block_hash));
-  const chapterComments = comments.filter(c => blockHashSet.has(c.block_hash));
-
-  // 所有 hooks 已声明，现在才可以条件返回
-  if (chapterComments.length === 0) return null;
-
-  // 按「被评论的句子」一级分组，打平 block 层级
-  // key: selected_text（有则用）；无 selected_text 时 fallback 到 block 首行
-  const blockMap = new Map(chapterBlocks.map(b => [b.block_hash, b]));
-  const blockOrder = new Map(chapterBlocks.map((b, i) => [b.block_hash, i]));
-
-  type SentenceGroup = {
-    mapKey: string;       // Map 去重 key（selected_text 或 '__block__'+hash）
-    sentence: string;     // 展示用文字
-    isFullBlock: boolean; // 无 selected_text 时为 true
-    block: ContentBlock;
-    comments: Comment[];
-  };
-
-  const sentenceMap = new Map<string, SentenceGroup>();
-  for (const c of chapterComments) {
-    const block = blockMap.get(c.block_hash)!;
-    const st = c.selected_text?.trim() ?? '';
-    const mapKey = st || `__block__${c.block_hash}`;
-    if (!sentenceMap.has(mapKey)) {
-      sentenceMap.set(mapKey, {
-        mapKey,
-        sentence: st || (block.raw_content.split('\n')[0]?.trim().slice(0, 80) ?? ''),
-        isFullBlock: !st,
-        block,
-        comments: [],
-      });
-    }
-    sentenceMap.get(mapKey)!.comments.push(c);
-  }
-
-  // 按 block 顺序排序，同一 block 内先句子评论后整段评论
-  const sentenceGroups = Array.from(sentenceMap.values()).sort((a, b) => {
-    const oi = blockOrder.get(a.block.block_hash) ?? 0;
-    const oj = blockOrder.get(b.block.block_hash) ?? 0;
-    if (oi !== oj) return oi - oj;
-    if (a.isFullBlock !== b.isFullBlock) return a.isFullBlock ? 1 : -1;
-    // 同一 block 内按句子在原文的出现位置排序
-    const text = a.block.raw_content;
-    const pa = text.indexOf(a.sentence.substring(0, 10));
-    const pb = text.indexOf(b.sentence.substring(0, 10));
-    return pa - pb;
-  });
-
-  return (
-    <div className="mt-6 border rounded-lg bg-card">
-      <div className="border-b px-4 py-2.5 bg-muted/50 flex items-center gap-2">
-        <MessageSquare className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">本章评论</span>
-        <span className="text-xs text-muted-foreground bg-muted rounded-full px-2 py-0.5">
-          {chapterComments.length} 条
-        </span>
-      </div>
-      <div className="divide-y">
-        {sentenceGroups.map(({ mapKey, sentence, isFullBlock, block, comments: gc }) => (
-          <div key={mapKey} className="px-4 py-4">
-            {/* 被评论句子引用 */}
-            <button
-              onClick={() => onSelectBlock(block.block_hash, isFullBlock ? '' : sentence)}
-              className={[
-                'w-full text-left mb-3 pl-3 border-l-2 text-xs transition-colors line-clamp-2',
-                isFullBlock
-                  ? 'border-gray-300 text-muted-foreground/70 hover:text-foreground italic'
-                  : 'border-orange-400 text-gray-700 hover:text-foreground',
-              ].join(' ')}
-            >
-              {sentence}{isFullBlock && sentence.length >= 80 && '…'}
-            </button>
-
-            {/* 该句子下的评论列表 */}
-            <div className="space-y-3">
-              {gc.map(c => (
-                <div key={c.id} className="group">
-                  <div className="flex gap-2.5">
-                    <Avatar name={c.username || '匿名'} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="text-sm font-medium truncate">{c.username || '匿名用户'}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">{timeAgo(c.created_at)}</span>
-                      </div>
-                      <p className="text-sm text-foreground leading-relaxed break-words">{c.content}</p>
-                      <ReplySection
-                        comment={c}
-                        documentId={documentId}
-                        currentUser={user}
-                        onLikeRoot={() => likeMutation.mutate(c.id)}
-                        onDeleteRoot={() => {
-                          if (window.confirm('确认删除这条评论？')) {
-                            deleteMutation.mutate(c.id);
-                          }
-                        }}
-                        canDeleteRoot={Boolean(user?.is_admin || c.user_id === user?.id)}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+import ReadingSettings, { loadSettings, saveSettings } from '../components/document/ReadingSettings';
+import DocumentHeader from '../components/document/DocumentHeader';
+import DocumentContent from '../components/document/DocumentContent';
+import DocumentFooter from '../components/document/DocumentFooter';
+import { BG_THEMES } from '../components/document/ReadingSettings';
+import { buildChapters } from '../utils/chapterUtils';
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
@@ -268,7 +26,7 @@ export default function DocumentPage() {
   const [lineHeight, setLineHeight] = useState(initSettings.lineHeight);
   const [bgKey, setBgKey] = useState(initSettings.bgKey);
   const bgTheme = BG_THEMES.find(t => t.key === bgKey) ?? BG_THEMES[0]!;
-  const readingStyle: ReadingStyle = { fontSize, lineHeight, bgColor: bgTheme.bgColor, textColor: bgTheme.textColor };
+  const readingStyle = { fontSize, lineHeight, bgColor: bgTheme.bgColor, textColor: bgTheme.textColor };
   // 记录文档切换时保存的章节索引，等章节列表建立后恢复
   const savedChapterRef = useRef(0);
   // 每篇文档只恢复一次，避免后续批量加载时反复跳转
@@ -307,10 +65,13 @@ export default function DocumentPage() {
   const [allBlocks, setAllBlocks] = useState<ContentBlock[]>([]);
   const [docMeta, setDocMeta] = useState<DocEntry | null>(null);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
+  // 使用 ref 存储累积的 blocks，只在每批完成时更新状态
+  const allBlocksRef = useRef<ContentBlock[]>([]);
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    allBlocksRef.current = [];
     setAllBlocks([]);
     setDocMeta(null);
     setLoadingBlocks(true);
@@ -318,14 +79,16 @@ export default function DocumentPage() {
     const BATCH = 5000;
     const loadAll = async () => {
       let offset = 0;
-      let accumulated: ContentBlock[] = [];
       let firstBatch = true;
       while (true) {
+        if (cancelled) return;
         const res = await api.getDocument(id, offset, BATCH);
         if (cancelled) return;
         if (firstBatch) { setDocMeta(res.document); firstBatch = false; }
-        accumulated = accumulated.concat(res.content);
-        setAllBlocks([...accumulated]);
+        // 累积到 ref，不触发重渲染
+        allBlocksRef.current = allBlocksRef.current.concat(res.content);
+        // 每批完成时更新一次状态
+        setAllBlocks([...allBlocksRef.current]);
         if (!res.pagination.hasMore) break;
         offset += BATCH;
       }
@@ -359,15 +122,22 @@ export default function DocumentPage() {
     const MAX_RETRIES = 10;
 
     const connect = () => {
-      // 读取 token，额外用 query param 传递（EventSource 不支持设置 Header）
+      // 读取 token，通过 Cookie 传递（EventSource 不支持设置 Header）
+      // 后端支持：Cookie > Query Param，优先使用 Cookie
       let token = '';
       try {
         const stored = localStorage.getItem('collab-auth');
         if (stored) token = JSON.parse(stored)?.state?.token ?? '';
       } catch {}
 
-      const url = `/api/comments/stream/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-      es = new EventSource(url);
+      // 设置 Cookie（与后端 Cookie 认证兼容）
+      if (token) {
+        document.cookie = `auth_token=${token}; path=/api; SameSite=Lax`;
+      }
+
+      // 不再通过 query param 传递 token（避免日志记录），后端从 Cookie 读取
+      const url = `/api/comments/stream/${id}`;
+      es = new EventSource(url, { withCredentials: true });
 
       es.onmessage = (event) => {
         try {
@@ -512,200 +282,68 @@ export default function DocumentPage() {
     )}>
       {/* 阅读内容列 */}
       <div className={cn('min-w-0 space-y-4', showComments ? 'flex-1' : 'w-full')}>
-      {/* 后台继续加载，不显示进度提示 */}
-      {/* 标题行 */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold truncate flex-1 pr-4">{data.document.title}</h1>
-        <div className="flex items-center gap-3 shrink-0">
-          {chapters.length > 1 && (
-            <button
-              onClick={() => setShowTOC(true)}
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <BookOpen className="h-4 w-4" />
-              目录
-            </button>
-          )}
-          <button
-            onClick={() => {
-              setShowComments(true);
-              setSelectedBlock(null);
-              setFocusCommentIds(null);
-            }}
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground relative"
-          >
-            <MessageSquare className="h-4 w-4" />
-            评论
-            {chapterCommentCount > 0 && (
-              <span className="absolute -top-1.5 -right-2 bg-primary text-primary-foreground text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                {chapterCommentCount > 99 ? '99+' : chapterCommentCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setShowSettings(v => !v)}
-            className={cn('inline-flex items-center gap-1.5 text-sm transition-colors', showSettings ? 'text-orange-500' : 'text-muted-foreground hover:text-foreground')}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            设置
-          </button>
-        </div>
-      </div>
-
-      {/* 阅读设置面板 */}
-      {showSettings && (
-        <div className="rounded-xl border bg-background shadow-md px-5 py-4 space-y-4 text-sm">
-          {/* 字体大小 */}
-          <div className="flex items-center gap-3">
-            <span className="w-14 text-muted-foreground shrink-0">字体大小</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { const i = FONT_SIZES.indexOf(fontSize); if (i > 0) { const v = FONT_SIZES[i-1]!; setFontSize(v); saveSettings({ fontSize: v, lineHeight, bgKey }); } }}
-                disabled={fontSize === FONT_SIZES[0]}
-                className="w-7 h-7 rounded border flex items-center justify-center text-base hover:bg-muted disabled:opacity-30"
-              >－</button>
-              <span className="w-10 text-center font-medium">{fontSize}px</span>
-              <button
-                onClick={() => { const i = FONT_SIZES.indexOf(fontSize); if (i < FONT_SIZES.length - 1) { const v = FONT_SIZES[i+1]!; setFontSize(v); saveSettings({ fontSize: v, lineHeight, bgKey }); } }}
-                disabled={fontSize === FONT_SIZES[FONT_SIZES.length - 1]}
-                className="w-7 h-7 rounded border flex items-center justify-center text-base hover:bg-muted disabled:opacity-30"
-              >＋</button>
-            </div>
-          </div>
-          {/* 行距 */}
-          <div className="flex items-center gap-3">
-            <span className="w-14 text-muted-foreground shrink-0">行距</span>
-            <div className="flex gap-2">
-              {LINE_HEIGHTS.map(lh => (
-                <button
-                  key={lh}
-                  onClick={() => { setLineHeight(lh); saveSettings({ fontSize, lineHeight: lh, bgKey }); }}
-                  className={cn('px-3 py-1 rounded border text-xs transition-colors', lh === lineHeight ? 'bg-orange-500 text-white border-orange-500' : 'hover:bg-muted')}
-                >{lh.toFixed(1)}</button>
-              ))}
-            </div>
-          </div>
-          {/* 背景色 */}
-          <div className="flex items-center gap-3">
-            <span className="w-14 text-muted-foreground shrink-0">背景</span>
-            <div className="flex gap-2">
-              {BG_THEMES.map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => { setBgKey(t.key); saveSettings({ fontSize, lineHeight, bgKey: t.key }); }}
-                  className={cn('px-3 py-1 rounded border text-xs transition-all', t.key === bgKey ? 'ring-2 ring-orange-500 ring-offset-1' : 'hover:opacity-80')}
-                  style={{ backgroundColor: t.bgColor, color: t.textColor, borderColor: t.key === bgKey ? '#f97316' : '#e5e7eb' }}
-                >{t.label}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 章节导航栏 */}
-      {chapters.length > 1 && (
-        <div className="sticky top-14 z-20 flex items-center justify-between border rounded-lg px-4 py-2 bg-background/95 backdrop-blur shadow-sm text-sm">
-          <button
-            onClick={() => goTo(currentChapter - 1)}
-            disabled={currentChapter === 0}
-            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            上一章
-          </button>
-
-          <button
-            onClick={() => setShowTOC(true)}
-            className="flex-1 text-center font-medium text-foreground px-4 hover:text-primary transition-colors truncate"
-          >
-            {chapter?.title ?? ''}
-            <span className="text-xs text-muted-foreground font-normal ml-2">
-              {currentChapter + 1} / {loadingBlocks ? '…' : chapters.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => goTo(currentChapter + 1)}
-            disabled={currentChapter === chapters.length - 1}
-            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
-          >
-            下一章
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {/* 正文 */}
-      <Editor
-        content={chapterBlocks}
-        blockCommentCount={blockCommentCount}
-        comments={commentsData?.comments ?? []}
-        readingStyle={readingStyle}
-        onSelectBlock={(hash, text) => {
-          setSelectedBlock({ hash, text });
-          setFocusCommentIds(null);
-          setShowComments(true);
-        }}
-        onClickCommentBubble={(ids, block) => {
-          setFocusCommentIds(ids);
-          setSelectedBlock({ hash: block.hash, text: block.text });
-          setShowComments(true);
-        }}
-      />
-
-      {/* 本章全部评论 */}
-      <ChapterComments
-        documentId={id!}
-        chapterBlocks={chapterBlocks}
-        comments={commentsData?.comments ?? []}
-        onSelectBlock={(hash, text) => {
-          setSelectedBlock({ hash, text });
-          setFocusCommentIds(null);
-          setShowComments(true);
-        }}
-      />
-
-      {/* 底部翻章按钮 */}
-      {chapters.length > 1 && (
-        <div className="flex items-center justify-between pt-4 border-t">
-          <button
-            onClick={() => goTo(currentChapter - 1)}
-            disabled={currentChapter === 0}
-            className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-30 transition-colors"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            上一章
-            {currentChapter > 0 && (
-              <span className="text-xs text-muted-foreground hidden sm:inline">
-                {chapters[currentChapter - 1]?.title}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => goTo(currentChapter + 1)}
-            disabled={currentChapter === chapters.length - 1}
-            className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-30 transition-colors"
-          >
-            {currentChapter < chapters.length - 1 && (
-              <span className="text-xs text-muted-foreground hidden sm:inline">
-                {chapters[currentChapter + 1]?.title}
-              </span>
-            )}
-            下一章
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {/* 目录抽屉 */}
-      {showTOC && (
-        <TableOfContents
+        <DocumentHeader
+          title={data.document.title}
           chapters={chapters}
           currentChapter={currentChapter}
-          onSelect={goTo}
-          onClose={() => setShowTOC(false)}
+          loadingBlocks={loadingBlocks}
+          chapterCommentCount={chapterCommentCount}
+          showSettings={showSettings}
+          onShowTOC={() => setShowTOC(true)}
+          onShowComments={() => {
+            setShowComments(true);
+            setSelectedBlock(null);
+            setFocusCommentIds(null);
+          }}
+          onToggleSettings={() => setShowSettings(v => !v)}
         />
-      )}
+
+        <ReadingSettings
+          fontSize={fontSize}
+          setFontSize={setFontSize}
+          lineHeight={lineHeight}
+          setLineHeight={setLineHeight}
+          bgKey={bgKey}
+          setBgKey={setBgKey}
+          showSettings={showSettings}
+        />
+
+        <DocumentContent
+          chapterBlocks={chapterBlocks}
+          blockCommentCount={blockCommentCount}
+          comments={commentsData?.comments ?? []}
+          readingStyle={readingStyle}
+          chapters={chapters}
+          currentChapter={currentChapter}
+          loadingBlocks={loadingBlocks}
+          onSelectBlock={(hash, text) => {
+            setSelectedBlock({ hash, text });
+            setFocusCommentIds(null);
+            setShowComments(true);
+          }}
+          onClickCommentBubble={(ids, block) => {
+            setFocusCommentIds(ids);
+            setSelectedBlock({ hash: block.hash, text: block.text });
+            setShowComments(true);
+          }}
+          onGoToChapter={goTo}
+        />
+
+        <DocumentFooter
+          chapters={chapters}
+          currentChapter={currentChapter}
+          onGoToChapter={goTo}
+        />
+
+        {/* 目录抽屉 */}
+        {showTOC && (
+          <TableOfContents
+            chapters={chapters}
+            currentChapter={currentChapter}
+            onSelect={goTo}
+            onClose={() => setShowTOC(false)}
+          />
+        )}
       </div>{/* end reading content */}
 
       {/* 内联评论侧栏：同正文并排，sticky 吸附在右侧 */}

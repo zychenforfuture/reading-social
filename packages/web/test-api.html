@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head><title>API Test</title></head>
+<body>
+<h1>API 测试</h1>
+<button onclick="testLogin()">测试登录</button>
+<pre id="result"></pre>
+
+<script>
+async function testLogin() {
+  const result = document.getElementById('result');
+  result.textContent = '请求中...';
+  
+  try {
+    // 测试相对路径
+    const res1 = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: 'admin@reading.local', password: 'Admin123456!'})
+    });
+    const data1 = await res1.json();
+    result.textContent = '相对路径 (/api/auth/login):\n' + JSON.stringify(data1, null, 2);
+    
+    // 测试绝对路径
+    const res2 = await fetch('http://localhost:3000/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: 'admin@reading.local', password: 'Admin123456!'})
+    });
+    const data2 = await res2.json();
+    result.textContent += '\n\n绝对路径 (http://localhost:3000/auth/login):\n' + JSON.stringify(data2, null, 2);
+  } catch (e) {
+    result.textContent = '错误：' + e.message;
+  }
+}
+</script>
+</body>
+</html>
