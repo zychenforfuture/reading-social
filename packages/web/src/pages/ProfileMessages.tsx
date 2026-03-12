@@ -70,6 +70,11 @@ export default function ProfileMessages() {
 
   function handleClickNotification(n: Notification) {
     if (!n.is_read) markRead.mutate(n.id);
+  }
+
+  function handleClickDocumentTitle(e: React.MouseEvent, n: Notification) {
+    e.stopPropagation();
+    if (!n.is_read) markRead.mutate(n.id);
     if (n.data?.documentId) {
       const url = n.data.blockHash
         ? `/documents/${n.data.documentId}?block=${n.data.blockHash}`
@@ -205,8 +210,21 @@ export default function ProfileMessages() {
                 {n.content && (
                   <p className="text-xs text-muted-foreground line-clamp-2 ml-6">{n.content}</p>
                 )}
+                {n.data?.selectedText && (
+                  <p className="text-xs text-muted-foreground ml-6 mt-0.5 border-l-2 border-gray-300 pl-2 italic line-clamp-2">
+                    {n.data.selectedText}
+                  </p>
+                )}
+                {n.data?.originalContent && (
+                  <p className="text-xs text-muted-foreground ml-6 mt-0.5 bg-muted/60 rounded px-2 py-0.5 line-clamp-2">
+                    你的评论：{n.data.originalContent}
+                  </p>
+                )}
                 {n.data?.documentTitle && (
-                  <p className="text-xs text-teal-600 ml-6 mt-0.5 truncate">《{n.data.documentTitle}》</p>
+                  <p
+                    className="text-xs text-teal-600 ml-6 mt-0.5 truncate hover:underline cursor-pointer"
+                    onClick={e => handleClickDocumentTitle(e, n)}
+                  >《{n.data.documentTitle}》</p>
                 )}
                 <p className="text-xs text-muted-foreground ml-6 mt-1">
                   {new Date(n.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

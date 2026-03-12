@@ -229,6 +229,8 @@ export type Notification = {
     documentId?: string;
     documentTitle?: string;
     blockHash?: string;
+    originalContent?: string;
+    selectedText?: string;
   };
   is_read: boolean;
   created_at: string;
