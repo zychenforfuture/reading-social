@@ -53,6 +53,43 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Ensure pgvector available in Postgres service (best-effort)
+        run: |
+          set -euo pipefail
+          echo "Attempting to locate Postgres service container..."
+          container=$(docker ps --filter ancestor=postgres:16-alpine -q | head -n1 || true)
+          if [ -z "$container" ]; then
+            container=$(docker ps --filter ancestor=postgres:16 -q | head -n1 || true)
+          fi
+          if [ -z "$container" ]; then
+            echo "Postgres service container not found; skipping pgvector install step."
+            exit 0
+          fi
+
+          echo "Found Postgres container: $container"
+          # Try common package managers to install pgvector (best-effort)
+          docker exec "$container" bash -lc "
+            if command -v apt-get >/dev/null 2>&1; then
+              apt-get update && apt-get install -y build-essential postgresql-server-dev-all git || true
+            elif command -v apk >/dev/null 2>&1; then
+              apk add --no-cache build-base postgresql-dev git || true
+            elif command -v yum >/dev/null 2>&1; then
+              yum install -y make gcc postgresql-devel git || true
+            fi
+            # Try to build and install pgvector from source (may fail on minimal images)
+            cd /usr/local/src || mkdir -p /usr/local/src && cd /usr/local/src
+            if [ ! -d pgvector ]; then
+              git clone https://github.com/pgvector/pgvector.git || true
+            fi
+            cd pgvector || true
+            make || true
+            make install || true
+          " || true
+
+          # Try to create extensions in the test database (will be ignored if extension not available)
+          docker exec "$container" psql -U admin -d collab_comments_test -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" || true
+          docker exec "$container" psql -U admin -d collab_comments_test -c "CREATE EXTENSION IF NOT EXISTS vector;" || true
+
       - name: Initialize test database schema
         run: |
           PGPASSWORD=testpassword psql -h localhost -p 5433 -U admin -d collab_comments_test -f docker/postgres/init.sql
