@@ -26,7 +26,6 @@ describe('Auth Integration Tests', () => {
     // 清理测试数据
     try {
       await pool.query('DELETE FROM users WHERE email LIKE $1', ['integration_%@example.com']);
-      await pool.end();
     } catch (e) {
       console.error('Cleanup error:', e);
     }

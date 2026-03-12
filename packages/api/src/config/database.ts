@@ -1,12 +1,50 @@
 import { Pool, PoolConfig } from 'pg';
 
-const poolConfig: PoolConfig = {
-  connectionString: process.env.DATABASE_URL,
-  max: 30,  // 增加最大连接数，大文档处理需要更多并发
-  idleTimeoutMillis: 60000, // 增加到 60 秒，避免长查询被断开
-  connectionTimeoutMillis: 10000, // 增加到 10 秒
-  statement_timeout: 300000, // 5 分钟语句超时（大文档批量插入需要时间）
-};
+// 清理可能来自外部的占位环境变量，避免向 pg 传入字面字符串 'undefined' 或其它非字符串密码
+if (process.env.PGPASSWORD === 'undefined' || process.env.PGPASSWORD === 'null') {
+  delete process.env.PGPASSWORD;
+}
+
+// 解析并清理 DATABASE_URL，防止出现 'undefined' 字符串被当成密码导致 pg 抛错
+function buildPoolConfig(): PoolConfig {
+  const raw = process.env.DATABASE_URL;
+  const baseConfig: PoolConfig = {
+    max: 30,
+    idleTimeoutMillis: 60000,
+    connectionTimeoutMillis: 10000,
+    // 注意：statement_timeout 作为连接参数传入需要使用 connectionParameters 或在 SQL 层设置，保留客户端超时设置
+  };
+
+  if (!raw) {
+    // 在本地测试环境没有设置 DATABASE_URL 时，返回基础配置（连接创建时会失败并由测试脚本提供提示）
+    return baseConfig;
+  }
+
+  try {
+    const u = new URL(raw);
+    const user = typeof u.username === 'string' && u.username.length > 0 ? u.username : undefined;
+    const rawPassword = typeof u.password === 'string' && u.password.length > 0 ? u.password : undefined;
+    const password = rawPassword && rawPassword !== 'undefined' && rawPassword !== 'null' ? rawPassword : undefined;
+    const host = u.hostname || undefined;
+    const port = u.port ? parseInt(u.port, 10) : undefined;
+    const database = u.pathname ? u.pathname.replace(/^\//, '') : undefined;
+
+    // 如果解析成功，优先使用分项配置，避免向 pg 传递非字符串或字面 'undefined'
+    return {
+      ...baseConfig,
+      host,
+      port,
+      user,
+      password,
+      database,
+    };
+  } catch (err) {
+    // 遇到解析错误则回退到直接使用 connectionString
+    return { ...baseConfig, connectionString: raw };
+  }
+}
+
+const poolConfig: PoolConfig = buildPoolConfig();
 
 export const pool = new Pool(poolConfig);
 

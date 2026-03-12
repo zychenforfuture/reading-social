@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     avatar_url VARCHAR(500),
+    email_verified BOOLEAN DEFAULT FALSE,
+    verification_token VARCHAR(64),
+    verification_token_expires TIMESTAMPTZ,
     is_admin BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

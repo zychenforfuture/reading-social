@@ -73,7 +73,6 @@ describe('Comment System Tests', () => {
       await pool.query('DELETE FROM comments WHERE user_id = $1', [testUserId]);
       await pool.query('DELETE FROM documents WHERE user_id = $1', [testUserId]);
       await pool.query('DELETE FROM users WHERE id = $1', [testUserId]);
-      await pool.end();
     } catch (e) {
       console.error('Cleanup error:', e);
     }

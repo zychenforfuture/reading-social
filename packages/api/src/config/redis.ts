@@ -2,9 +2,10 @@ import Redis, { type RedisOptions } from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// 解析 Redis URL 获取密码
+// 解析 Redis URL 获取密码（过滤掉字符串 'undefined'）
 const url = new URL(redisUrl);
-const password = url.password || undefined;
+const rawPassword = url.password;
+const password = rawPassword && rawPassword !== 'undefined' ? rawPassword : undefined;
 
 const redisConfig: RedisOptions = {
   host: url.hostname,

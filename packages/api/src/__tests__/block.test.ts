@@ -21,7 +21,6 @@ describe('Block API', () => {
     // 清理测试数据
     try {
       await pool.query('DELETE FROM content_blocks WHERE block_hash = $1', [testBlockHash]);
-      await pool.end();
     } catch (e) {
       console.error('Cleanup error:', e);
     }
