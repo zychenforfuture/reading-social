@@ -99,7 +99,7 @@ describe('Concurrency Tests - 并发测试', () => {
       const testBlockHash = '0000000000000000000000000000000000000000000000000000000000000000';
       
       // 模拟 10 个并发评论
-      const commentPromises = Array.from({ length: 10 }, (_, i) =>
+      const commentPromises = Array.from({ length: 10 }, async (_, i) =>
         request(await import('../app.js').then(m => m.default))
           .post('/api/comments')
           .set('Authorization', `Bearer ${authToken1}`)

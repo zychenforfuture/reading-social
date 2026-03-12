@@ -53,6 +53,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Initialize test database schema
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -p 5433 -U admin -d collab_comments_test -f docker/postgres/init.sql
+        env:
+          PGPASSWORD: testpassword
+
       - name: Run lint
         run: pnpm -r lint
 

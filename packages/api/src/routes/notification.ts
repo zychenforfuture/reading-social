@@ -11,7 +11,7 @@ const router: Router = Router();
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS notifications (
-        id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         type         VARCHAR(50)  NOT NULL,          -- reply | mention | like
         title        VARCHAR(200) NOT NULL,

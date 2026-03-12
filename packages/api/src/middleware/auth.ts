@@ -44,7 +44,7 @@ function extractToken(req: Request): string | null {
   }
 
   // 3. 尝试从 Query Param 获取（仅用于 SSE 兼容，不推荐）
-  const queryToken = req.query['token'] as string | undefined;
+  const queryToken = req.query?.['token'] as string | undefined;
   if (queryToken) {
     return queryToken;
   }

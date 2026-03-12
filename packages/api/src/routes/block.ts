@@ -5,10 +5,16 @@ import { computeSimHash, hammingDistance, calculateSimilarityScore } from '../ut
 
 const router: Router = Router();
 
+const SHA256_HASH_REGEX = /^[0-9a-f]{64}$/i;
+
 // 获取内容块的评论
 router.get('/:hash/comments', async (req, res) => {
   try {
     const { hash } = req.params;
+
+    if (!SHA256_HASH_REGEX.test(hash)) {
+      return res.status(400).json({ error: 'Invalid hash format' });
+    }
 
     // 验证 hash 是否存在
     const blockExists = await pool.query(
@@ -55,6 +61,19 @@ router.get('/:hash/similar', async (req, res) => {
   try {
     const { hash } = req.params;
 
+    if (!SHA256_HASH_REGEX.test(hash)) {
+      return res.status(400).json({ error: 'Invalid hash format' });
+    }
+
+    // 验证块是否存在
+    const blockExists = await pool.query(
+      'SELECT block_hash FROM content_blocks WHERE block_hash = $1',
+      [hash]
+    );
+    if (blockExists.rows.length === 0) {
+      return res.status(404).json({ error: 'Content block not found' });
+    }
+
     const result = await pool.query(
       `SELECT sb.similar_hash, sb.similarity_score, sb.algorithm,
               cb.raw_content, cb.word_count, cb.occurrence_count
@@ -77,6 +96,10 @@ router.get('/:hash/similar', async (req, res) => {
 router.get('/:hash', async (req, res) => {
   try {
     const { hash } = req.params;
+
+    if (!SHA256_HASH_REGEX.test(hash)) {
+      return res.status(400).json({ error: 'Invalid hash format' });
+    }
 
     const result = await pool.query(
       `SELECT block_hash, raw_content, word_count,
