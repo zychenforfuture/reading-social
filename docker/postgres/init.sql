@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS documents (
     content TEXT,                   -- 原始文本，用于重新分块（处理完成后置 NULL）
     file_hash VARCHAR(64),          -- 整文件 MD5 (秒传用)
     canonical_document_id UUID REFERENCES documents(id) ON DELETE CASCADE, -- 跨用户去重引用
+    doc_simhash VARCHAR(16),        -- 全文 SimHash（文档级近似去重用）
+    doc_b0 VARCHAR(4),              -- doc_simhash LSH band 0 (bits 0-15)
+    doc_b1 VARCHAR(4),              -- doc_simhash LSH band 1 (bits 16-31)
+    doc_b2 VARCHAR(4),              -- doc_simhash LSH band 2 (bits 32-47)
+    doc_b3 VARCHAR(4),              -- doc_simhash LSH band 3 (bits 48-63)
     word_count INTEGER DEFAULT 0,
     block_count INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'processing',  -- processing, ready, error
@@ -34,6 +39,10 @@ CREATE INDEX idx_documents_user_id ON documents(user_id);
 CREATE INDEX idx_documents_file_hash ON documents(file_hash);
 CREATE INDEX idx_documents_status ON documents(status);
 CREATE INDEX idx_documents_canonical ON documents(canonical_document_id);
+CREATE INDEX idx_documents_doc_b0 ON documents(doc_b0) WHERE doc_b0 IS NOT NULL;
+CREATE INDEX idx_documents_doc_b1 ON documents(doc_b1) WHERE doc_b1 IS NOT NULL;
+CREATE INDEX idx_documents_doc_b2 ON documents(doc_b2) WHERE doc_b2 IS NOT NULL;
+CREATE INDEX idx_documents_doc_b3 ON documents(doc_b3) WHERE doc_b3 IS NOT NULL;
 
 -- 内容块表 (核心表)
 CREATE TABLE IF NOT EXISTS content_blocks (
@@ -42,10 +51,20 @@ CREATE TABLE IF NOT EXISTS content_blocks (
     word_count INTEGER DEFAULT 0,
     occurrence_count INTEGER DEFAULT 1,  -- 在多少文档中出现
     similarity_hash VARCHAR(64),  -- SimHash 用于模糊匹配
+    sh_b0 VARCHAR(4),  -- SimHash LSH band 0 (bits 0-15)
+    sh_b1 VARCHAR(4),  -- SimHash LSH band 1 (bits 16-31)
+    sh_b2 VARCHAR(4),  -- SimHash LSH band 2 (bits 32-47)
+    sh_b3 VARCHAR(4),  -- SimHash LSH band 3 (bits 48-63)
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_content_blocks_similarity ON content_blocks(similarity_hash);
+CREATE INDEX idx_cb_sh_b0 ON content_blocks(sh_b0) WHERE sh_b0 IS NOT NULL;
+CREATE INDEX idx_cb_sh_b1 ON content_blocks(sh_b1) WHERE sh_b1 IS NOT NULL;
+CREATE INDEX idx_cb_sh_b2 ON content_blocks(sh_b2) WHERE sh_b2 IS NOT NULL;
+CREATE INDEX idx_cb_sh_b3 ON content_blocks(sh_b3) WHERE sh_b3 IS NOT NULL;
+CREATE INDEX idx_content_blocks_occurrence ON content_blocks(occurrence_count DESC);
+CREATE INDEX idx_content_blocks_created ON content_blocks(created_at DESC);
 
 -- 文档 - 块映射表 (倒排索引)
 CREATE TABLE IF NOT EXISTS document_blocks (
@@ -58,6 +77,7 @@ CREATE TABLE IF NOT EXISTS document_blocks (
 );
 CREATE INDEX idx_document_blocks_lookup ON document_blocks(document_id, sequence_order);
 CREATE INDEX idx_block_hash_lookup ON document_blocks(block_hash);
+CREATE INDEX idx_document_blocks_block_hash ON document_blocks(block_hash);
 
 -- 评论表
 CREATE TABLE IF NOT EXISTS comments (
@@ -82,6 +102,8 @@ CREATE INDEX idx_comments_by_user ON comments(user_id);
 CREATE INDEX idx_comments_parent ON comments(parent_comment_id);
 CREATE INDEX idx_comments_root_id ON comments(root_id);
 CREATE INDEX idx_comments_sentence_hash ON comments(sentence_hash);
+CREATE INDEX idx_comments_created_at ON comments(created_at DESC);
+CREATE INDEX idx_comments_like_count ON comments(like_count DESC);
 
 -- 相似块表 (模糊匹配)
 CREATE TABLE IF NOT EXISTS similar_blocks (
@@ -93,6 +115,7 @@ CREATE TABLE IF NOT EXISTS similar_blocks (
     PRIMARY KEY (block_hash, similar_hash, algorithm)
 );
 CREATE INDEX idx_similar_blocks_lookup ON similar_blocks(block_hash, similarity_score DESC);
+CREATE INDEX idx_similar_blocks_score ON similar_blocks(similarity_score DESC);
 
 -- 文档向量嵌入表 (用于语义搜索)
 CREATE TABLE IF NOT EXISTS document_embeddings (
@@ -100,6 +123,16 @@ CREATE TABLE IF NOT EXISTS document_embeddings (
     embedding VECTOR(768),  -- 或 1536 (根据使用的模型)
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 失败的向量嵌入记录表 (用于重试)
+CREATE TABLE IF NOT EXISTS failed_embeddings (
+    block_hash VARCHAR(64) PRIMARY KEY REFERENCES content_blocks(block_hash) ON DELETE CASCADE,
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_failed_embeddings_retry ON failed_embeddings(created_at);
 
 -- 更新时间的触发器函数
 CREATE OR REPLACE FUNCTION update_updated_at_column()

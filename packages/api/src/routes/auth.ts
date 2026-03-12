@@ -41,7 +41,43 @@ async function runMigration() {
     await pool.query(`
       ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;
     `);
-    logger.info('Auth migration: email_verified + email_otps + avatar_url(TEXT) ready');
+    // 为 SimHash LSH 加 4 个 band 列（如已存在则跳过）
+    await pool.query(`
+      ALTER TABLE content_blocks
+        ADD COLUMN IF NOT EXISTS sh_b0 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS sh_b1 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS sh_b2 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS sh_b3 VARCHAR(4);
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b0 ON content_blocks(sh_b0) WHERE sh_b0 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b1 ON content_blocks(sh_b1) WHERE sh_b1 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b2 ON content_blocks(sh_b2) WHERE sh_b2 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cb_sh_b3 ON content_blocks(sh_b3) WHERE sh_b3 IS NOT NULL;
+    `);
+    // 失败嵌入记录表（用于重试，worker 依赖此表）
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS failed_embeddings (
+        block_hash VARCHAR(64) PRIMARY KEY REFERENCES content_blocks(block_hash) ON DELETE CASCADE,
+        error_message TEXT,
+        retry_count INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry ON failed_embeddings(created_at);
+    `);
+    // 文档级 SimHash（优化三：文档近似去重，跨用户同书识别）
+    await pool.query(`
+      ALTER TABLE documents
+        ADD COLUMN IF NOT EXISTS doc_simhash VARCHAR(16),
+        ADD COLUMN IF NOT EXISTS doc_b0 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS doc_b1 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS doc_b2 VARCHAR(4),
+        ADD COLUMN IF NOT EXISTS doc_b3 VARCHAR(4);
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b0 ON documents(doc_b0) WHERE doc_b0 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b1 ON documents(doc_b1) WHERE doc_b1 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b2 ON documents(doc_b2) WHERE doc_b2 IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_documents_doc_b3 ON documents(doc_b3) WHERE doc_b3 IS NOT NULL;
+    `);
+    logger.info('Auth migration: email_verified + email_otps + avatar_url(TEXT) + failed_embeddings + doc_simhash ready');
 
     // 同步管理员状态
     await syncAdminEmails();
@@ -61,7 +97,15 @@ async function createInitialAdmin() {
   if (!email || !username || !password) return;
 
   const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-  if (existing.rows.length > 0) return; // 已存在，跳过
+
+  if (existing.rows.length > 0) {
+    // 用户已存在：仅确保管理员权限与邮箱验证状态，不覆盖密码（用户可自行修改密码）
+    await pool.query(
+      `UPDATE users SET is_admin = true, email_verified = true WHERE email = $1`,
+      [email]
+    );
+    return;
+  }
 
   // ✅ 使用 bcrypt 哈希管理员密码
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
