@@ -135,7 +135,7 @@ jobs:
           JWT_SECRET: test-jwt-secret-for-ci-testing-min-32-chars
 
       - name: Run coverage
-        run: pnpm --filter @collab/api test --coverage
+        run: pnpm --filter @collab/api test -- --coverage
 
       - name: Upload coverage to Coveralls
         uses: coverallsapp/github-action@master
