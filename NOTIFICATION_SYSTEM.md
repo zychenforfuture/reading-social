@@ -1,163 +1,74 @@
-# 用户通知系统
+# 通知系统
 
-> 实现时间：2026-03-07
+## 状态
 
-## 📖 功能概述
+- API：✅ 已实现
+- Web：✅ 已实现（通知铃铛 + 通知页面）
+- Mobile：⏳ 未实现通知页面
 
-共鸣阅读平台的通知系统，支持以下通知类型：
+## 功能范围
 
-- **💬 回复通知** - 有人回复了你的评论
-- **🔔 提及通知** - 有人在评论中@了你
-- **❤️ 点赞通知** - 有人点赞了你的评论（待实现）
-- **⚙️ 系统通知** - 系统公告、更新等
+当前通知类型：
+- reply：回复通知
+- mention：提及通知
+- like：点赞通知
 
-## 🛠️ 技术实现
+## 后端实现
 
-### 后端 (API)
+主要文件：
+- packages/api/src/routes/notification.ts
+- packages/api/src/utils/notifications.ts
+- packages/api/src/routes/comment.ts
 
-**文件结构**:
-```
-packages/api/src/
-├── config/notificationQueue.ts    # BullMQ 通知队列配置
-├── routes/notifications.ts        # 通知 API 路由
-└── routes/comment.ts              # 评论路由（已集成通知）
-```
+主要端点：
+- GET /api/notifications
+- GET /api/notifications/unread-count
+- PUT /api/notifications/read-all
+- PUT /api/notifications/read-batch
+- PUT /api/notifications/:id/read
+- DELETE /api/notifications/:id
+- POST /api/notifications/delete-batch
 
-**API 端点**:
-- `GET /api/notifications` - 获取通知列表
-- `GET /api/notifications/unread-count` - 获取未读数量
-- `PUT /api/notifications/:id/read` - 标记单个已读
-- `PUT /api/notifications/read-all` - 全部标记已读
-- `DELETE /api/notifications/:id` - 删除通知
-- `POST /api/notifications` - 创建通知（内部使用）
+数据库表（启动时自动迁移创建）：
 
-**数据库表**:
 ```sql
 notifications (
-  id UUID,
-  user_id UUID,
-  type VARCHAR(50),      -- reply/mention/system/like
-  title VARCHAR(200),
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL,
+  type VARCHAR(50) NOT NULL,        -- reply | mention | like
+  title VARCHAR(200) NOT NULL,
   content TEXT,
-  data JSONB,            -- 额外数据
-  is_read BOOLEAN,
-  created_at TIMESTAMPTZ
+  data JSONB NOT NULL DEFAULT '{}',
+  is_read BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL
 )
 ```
 
-### 前端 (Web)
+## Web 实现
 
-**文件结构**:
-```
-packages/web/src/
-├── hooks/useNotifications.ts      # 通知 Hook
-├── components/NotificationBell.tsx # 通知铃铛组件
-└── components/Layout.tsx          # 已集成铃铛
-```
+主要文件：
+- packages/web/src/components/NotificationBell.tsx
+- packages/web/src/pages/ProfileMessages.tsx
+- packages/web/src/hooks/useNotifications.ts
 
-**功能**:
-- 📱 响应式设计（移动端适配）
-- 🔴 未读角标显示
-- ⚡ 实时刷新
-- 🗑️ 删除通知
-- ✅ 标记已读/全部已读
+已实现能力：
+- 顶栏未读角标
+- 通知列表分页与筛选
+- 单条已读 / 批量已读
+- 单条删除 / 批量删除
 
-## 🚀 部署步骤
+## 部署与迁移
 
-### 1. 数据库迁移
+通知表由 API 启动时自动创建，一般不需要手工执行迁移脚本。
 
-**生产环境**:
-```bash
-docker exec -i reading-postgres-1 psql -U postgres -d collab < scripts/migrate-notifications.sql
-```
+部署后验证：
+1. 登录 Web。
+2. 右上角查看通知铃铛未读数。
+3. 打开 /profile/messages 验证读写与删除行为。
 
-**测试环境**:
-```bash
-docker exec -i reading-test-postgres-1 psql -U postgres -d collab_test < scripts/migrate-notifications.sql
-```
+## 已知边界
 
-### 2. 重启 API 服务
+- 当前没有 WebSocket 推送，通知主要通过轮询/刷新机制更新。
+- Mobile 端暂未提供通知页面。
 
-```bash
-# 生产环境
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build api
-
-# 测试环境
-docker compose -f docker-compose.test.yml up -d --build api
-```
-
-### 3. 验证
-
-访问 Web 端，登录后应该能看到：
-- Header 右上角的通知铃铛图标
-- 未读通知时显示红色角标
-- 点击铃铛查看通知列表
-
-## 📝 使用示例
-
-### 创建通知（后端）
-
-```typescript
-import { notificationQueue } from '../config/notificationQueue.js';
-
-// 创建回复通知
-await notificationQueue.add('send-notification', {
-  userId: 'user-uuid',
-  type: 'reply',
-  title: '有人回复了你的评论',
-  content: '回复内容...',
-  data: { commentId: 'xxx', rootId: 'xxx' },
-  sendTelegram: false, // 可选：是否发送 Telegram 推送
-});
-```
-
-### 获取通知（前端）
-
-```typescript
-import { useNotifications } from './hooks/useNotifications';
-
-function MyComponent() {
-  const {
-    notifications,
-    unreadCount,
-    markAsRead,
-    markAllAsRead,
-  } = useNotifications();
-
-  return (
-    <div>
-      {unreadCount > 0 && <span>{unreadCount} 未读</span>}
-      {notifications.map(n => (
-        <div key={n.id}>{n.title}</div>
-      ))}
-    </div>
-  );
-}
-```
-
-## 🔮 待扩展功能
-
-- [ ] Telegram 推送集成
-- [ ] 邮件通知
-- [ ] WebSocket 实时推送
-- [ ] 通知设置（用户可选择接收哪些类型）
-- [ ] 点赞通知
-- [ ] 评论被删除时的通知处理
-
-## 📊 测试
-
-运行 API 测试：
-```bash
-cd packages/api
-pnpm test
-```
-
-测试通知相关功能：
-- 创建评论回复 → 检查通知是否创建
-- 获取通知列表 → 验证数据格式
-- 标记已读 → 验证状态更新
-
----
-
-**最后更新**: 2026-03-07
-**状态**: ✅ 开发完成，待部署测试
+更新时间：2026-03-14
