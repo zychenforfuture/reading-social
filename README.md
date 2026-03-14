@@ -13,7 +13,8 @@
 ## 文档分层
 
 - 对外展示版（当前文档）：[README.md](./README.md)
-- 内部开发版（详细架构/命令/排障）：[docs/README.dev.md](./docs/README.dev.md)
+- 维护总览（项目全信息）：[docs/README.dev.md](./docs/README.dev.md)
+- 维护文档（开发/测试/部署）：见 docs 目录下三份文档
 
 ## 当前能力边界
 
@@ -60,12 +61,10 @@ cp .env.production.example .env.production
 
 ## 详细文档
 
-- [docs/README.dev.md](./docs/README.dev.md)：内部开发总览（架构、模块边界、完整命令）
-- [LOCAL_DEV.md](./LOCAL_DEV.md)：本地开发与排查
-- [LOCAL_TESTING.md](./LOCAL_TESTING.md)：本地测试流程
-- [TESTING.md](./TESTING.md)：测试范围与扩展建议
-- [NOTIFICATION_SYSTEM.md](./NOTIFICATION_SYSTEM.md)：通知系统接口与实现
-- [SECURITY_MIGRATION.md](./SECURITY_MIGRATION.md)：安全与鉴权迁移
+- [docs/README.dev.md](./docs/README.dev.md)：内部开发总览（项目全信息）
+- [docs/development.md](./docs/development.md)：开发文档（启动、联调、排障）
+- [docs/testing.md](./docs/testing.md)：测试文档（一键测试、覆盖率、故障排查）
+- [docs/deployment.md](./docs/deployment.md)：部署文档（生产发布、运维命令、备份）
 
 ## 路线图（简版）
 
