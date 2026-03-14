@@ -12,6 +12,10 @@
 - Worker：可用
 - Mobile：基础可用
 
+运行模式：
+- 开发：混合模式（Docker 基础设施 + 本地服务进程）
+- 部署：全 Docker 模式（基础设施与应用服务容器化）
+
 ## 2. 能力边界（按当前代码）
 
 | 模块 | 状态 | 说明 |
@@ -91,9 +95,9 @@ pnpm test:watch
 
 ```bash
 cp .env.production.example .env.production
-./deploy.sh up
-./deploy.sh status
-./deploy.sh logs
+./scripts/deploy.sh up
+./scripts/deploy.sh status
+./scripts/deploy.sh logs
 ```
 
 ## 7. 已知限制

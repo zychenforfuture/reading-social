@@ -9,6 +9,7 @@
 - Web 端已可用：登录注册、阅读、评论回复点赞、目录、阅读设置、通知中心
 - API 与 Worker 已可用：鉴权、队列、SSE、SimHash + Embedding、Qdrant 存储
 - Mobile 端基础可用：登录注册、阅读评论、个人资料；通知中心与阅读设置待补齐
+- 运行策略：开发采用混合模式，部署采用全 Docker 模式
 
 ## 文档分层
 
@@ -51,7 +52,7 @@ pnpm test
 
 ```bash
 cp .env.production.example .env.production
-./deploy.sh up
+./scripts/deploy.sh up
 ```
 
 ## 常用入口

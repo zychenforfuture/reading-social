@@ -1,6 +1,6 @@
 # 脚本说明
 
-本目录当前保留一个脚本：`test.sh`。
+本目录当前保留两个脚本：`test.sh` 和 `deploy.sh`。
 
 ## test.sh
 
@@ -26,9 +26,32 @@ pnpm test
 ./scripts/test.sh auth.test.ts
 ```
 
+## deploy.sh
+
+用途：生产部署入口。
+
+常用命令：
+
+```bash
+# 启动服务
+./scripts/deploy.sh up
+
+# 查看状态和日志
+./scripts/deploy.sh status
+./scripts/deploy.sh logs
+
+# 重启或重建
+./scripts/deploy.sh restart
+./scripts/deploy.sh rebuild
+
+# 停止与备份
+./scripts/deploy.sh down
+./scripts/deploy.sh db-backup
+```
+
 说明：
-- 开发启动统一使用 `pnpm run dev:all`，不再使用旧的 `scripts/dev.sh`。
-- 生产部署统一使用根目录 `deploy.sh`。
+- 开发模式采用混合模式：Docker 跑基础设施，本地运行 API/Worker/Web（`pnpm run dev:all`）。
+- 部署模式采用全 Docker 模式：统一使用 `scripts/deploy.sh`。
 
 ## 相关文档
 

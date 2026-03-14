@@ -2,6 +2,8 @@
 
 本文件说明生产环境的最小部署流程。
 
+部署模式：全 Docker 模式（基础设施与应用服务均在容器内运行）。
+
 ## 1. 准备
 
 - 已安装 Docker 与 Docker Compose
@@ -27,21 +29,21 @@ cp .env.production.example .env.production
 ## 2. 推荐部署方式（脚本）
 
 ```bash
-./deploy.sh up
+./scripts/deploy.sh up
 ```
 
 常用命令：
 
 ```bash
-./deploy.sh status
-./deploy.sh logs
-./deploy.sh restart
-./deploy.sh rebuild
-./deploy.sh down
-./deploy.sh db-backup
+./scripts/deploy.sh status
+./scripts/deploy.sh logs
+./scripts/deploy.sh restart
+./scripts/deploy.sh rebuild
+./scripts/deploy.sh down
+./scripts/deploy.sh db-backup
 ```
 
-## 3. 直接 compose 部署（可选）
+## 3. 直接 compose 部署
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
@@ -66,13 +68,13 @@ curl http://localhost:3000/health || true
 ### 快速停止
 
 ```bash
-./deploy.sh down
+./scripts/deploy.sh down
 ```
 
 ### 数据备份
 
 ```bash
-./deploy.sh db-backup
+./scripts/deploy.sh db-backup
 ```
 
 说明：生产 HTTPS 证书与自动续期策略需按实际域名环境单独配置。

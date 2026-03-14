@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+
 echo "=========================================="
 echo "  跨文档协同评论系统 - Docker 部署脚本"
 echo "=========================================="

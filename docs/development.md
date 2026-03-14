@@ -2,6 +2,8 @@
 
 本文件是本地开发的最小闭环说明。
 
+开发模式：混合模式（Docker 基础设施 + 本地 Node 进程）。
+
 ## 1. 环境要求
 
 - Node.js >= 20
@@ -16,7 +18,7 @@ pnpm install
 pnpm run dev:all
 ```
 
-说明：`dev:all` 会启动 postgres、redis、qdrant，并拉起 API、Worker、Web。
+说明：`dev:all` 采用混合模式，会启动 postgres、redis、qdrant（容器），并在本机拉起 API、Worker、Web。
 
 ## 3. 手动启动（排障用）
 
