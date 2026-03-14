@@ -7,7 +7,7 @@
 ## 项目摘要
 
 - Web 端已可用：登录注册、阅读、评论回复点赞、目录、阅读设置、通知中心
-- API 与 Worker 已可用：鉴权、队列、SSE、SimHash + Embedding、Qdrant 存储
+- API 已可用：鉴权、队列、SSE、SimHash；Embedding 后端链路已完成，Qdrant 未集成
 - Mobile 端基础可用：登录注册、阅读评论、个人资料；通知中心与阅读设置待补齐
 - 运行策略：开发采用混合模式，部署采用全 Docker 模式
 
@@ -23,7 +23,7 @@
 |------|------|------|
 | Web | ✅ 已完成 | 含 /profile/messages 通知页面 |
 | API | ✅ 已完成 | JWT、OTP、评论、通知、Swagger |
-| Worker | ✅ 已完成 | 分块、相似检测、向量写入 |
+| Worker | ⚠️ 部分完成 | 分块、SimHash 已完成；Embedding 后端链路已完成，Qdrant 未集成 |
 | Mobile | ⚠️ 部分完成 | 主流程可用，通知与阅读设置未补齐 |
 | 跨文档评论产品化 | ⚠️ 部分完成 | 后端支持重映射，前端聚合视图未完成 |
 
