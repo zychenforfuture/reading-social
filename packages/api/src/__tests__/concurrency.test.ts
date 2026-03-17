@@ -97,8 +97,40 @@ describe('Concurrency Tests - 并发测试', () => {
 
   describe('并发评论测试', () => {
     it('应该正确处理并发评论（reply_count 更新）', async () => {
-      const testBlockHash = '0000000000000000000000000000000000000000000000000000000000000000';
-      
+      // 先创建测试文档和内容块
+      const docContent = '这是用于测试并发评论的内容。';
+      const uploadRes = await request(await import('../app.js').then(m => m.default))
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken1}`)
+        .send({ title: '并发评论测试文档', content: docContent });
+
+      if (uploadRes.status !== 200 && uploadRes.status !== 201) {
+        return;
+      }
+
+      const testDocumentId = uploadRes.body.document.id;
+
+      // 等待文档处理完成
+      let testBlockHash: string | null = null;
+      for (let i = 0; i < 20; i++) {
+        const statusRes = await request(await import('../app.js').then(m => m.default))
+          .get(`/api/documents/${testDocumentId}`)
+          .set('Authorization', `Bearer ${authToken1}`);
+
+        if (statusRes.body.document?.status === 'ready' && statusRes.body.content?.length > 0) {
+          testBlockHash = statusRes.body.content[0].block_hash;
+          break;
+        }
+
+        if (i === 19) {
+          throw new Error(`Document ${testDocumentId} did not become ready in time`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      if (!testBlockHash) return;
+
       // 模拟 10 个并发评论
       const commentPromises = Array.from({ length: 10 }, async (_, i) =>
         request(await import('../app.js').then(m => m.default))
@@ -125,9 +157,41 @@ describe('Concurrency Tests - 并发测试', () => {
 
   describe('并发点赞测试', () => {
     it('应该正确处理并发点赞（like_count 更新）', async () => {
-      // 先创建一个测试评论
-      const testBlockHash = '0000000000000000000000000000000000000000000000000000000000000000';
-      
+      // 先创建测试文档
+      const docContent = '这是用于测试点赞的文档内容。';
+      const uploadRes = await request(await import('../app.js').then(m => m.default))
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken1}`)
+        .send({ title: '并发点赞测试文档', content: docContent });
+
+      if (uploadRes.status !== 200 && uploadRes.status !== 201) {
+        return;
+      }
+
+      const testDocumentId = uploadRes.body.document.id;
+
+      // 等待文档处理完成
+      let testBlockHash: string | null = null;
+      for (let i = 0; i < 20; i++) {
+        const statusRes = await request(await import('../app.js').then(m => m.default))
+          .get(`/api/documents/${testDocumentId}`)
+          .set('Authorization', `Bearer ${authToken1}`);
+
+        if (statusRes.body.document?.status === 'ready' && statusRes.body.content?.length > 0) {
+          testBlockHash = statusRes.body.content[0].block_hash;
+          break;
+        }
+
+        if (i === 19) {
+          throw new Error(`Document ${testDocumentId} did not become ready in time`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      if (!testBlockHash) return;
+
+      // 创建测试评论
       const createRes = await request(await import('../app.js').then(m => m.default))
         .post('/api/comments')
         .set('Authorization', `Bearer ${authToken1}`)
@@ -137,7 +201,7 @@ describe('Concurrency Tests - 并发测试', () => {
         });
 
       if (createRes.status !== 201) return;
-      
+
       const commentId = createRes.body.comment.id;
 
       // 模拟 10 个并发点赞

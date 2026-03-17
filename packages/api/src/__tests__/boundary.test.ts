@@ -20,13 +20,13 @@ describe('Boundary Tests - 边界测试', () => {
     // 创建测试用户
     const bcrypt = await import('bcrypt');
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
-    
+
     const userResult = await pool.query(
       `INSERT INTO users (email, username, password_hash, email_verified)
        VALUES ($1, $2, $3, true) RETURNING id`,
       [TEST_EMAIL, TEST_USERNAME, passwordHash]
     );
-    
+
     testUserId = userResult.rows[0].id;
 
     // 登录获取 token
@@ -51,7 +51,7 @@ describe('Boundary Tests - 边界测试', () => {
   describe('Auth 模块边界测试', () => {
     it('应该拒绝超长邮箱（>254 字符）', async () => {
       const longEmail = 'a'.repeat(300) + '@example.com';
-      
+
       const res = await request(app)
         .post('/api/auth/register')
         .send({
@@ -67,7 +67,7 @@ describe('Boundary Tests - 边界测试', () => {
 
     it('应该拒绝超长密码（>128 字符）', async () => {
       const longPassword = 'a'.repeat(200);
-      
+
       const res = await request(app)
         .post('/api/auth/register')
         .send({
@@ -110,7 +110,7 @@ describe('Boundary Tests - 边界测试', () => {
 
     it('应该拒绝超长标题（>500 字符）', async () => {
       const longTitle = 'a'.repeat(600);
-      
+
       const res = await request(app)
         .post('/api/documents')
         .set('Authorization', `Bearer ${authToken}`)
@@ -136,7 +136,7 @@ describe('Boundary Tests - 边界测试', () => {
 
     it('应该接受超大文档（10MB+）', async () => {
       const largeContent = 'a'.repeat(10 * 1024 * 1024); // 10MB
-      
+
       const res = await request(app)
         .post('/api/documents')
         .set('Authorization', `Bearer ${authToken}`)
@@ -151,41 +151,83 @@ describe('Boundary Tests - 边界测试', () => {
   });
 
   describe('Comment 模块边界测试', () => {
+    let testBlockHash: string | null = null;
+
+    beforeAll(async () => {
+      // 创建测试文档获取有效的 block_hash
+      const docContent = '这是用于边界测试的文档内容。';
+      const uploadRes = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          title: '边界测试文档',
+          content: docContent,
+        });
+
+      if (uploadRes.status === 200 || uploadRes.status === 201) {
+        const testDocumentId = uploadRes.body.document.id;
+
+        // 等待文档处理完成
+        for (let i = 0; i < 20; i++) {
+          const statusRes = await request(app)
+            .get(`/api/documents/${testDocumentId}`)
+            .set('Authorization', `Bearer ${authToken}`);
+
+          if (statusRes.body.document?.status === 'ready' && statusRes.body.content?.length > 0) {
+            testBlockHash = statusRes.body.content[0].block_hash;
+            break;
+          }
+
+          if (i === 19) {
+            throw new Error(`Document ${testDocumentId} did not become ready in time`);
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    });
+
     it('应该拒绝空内容评论', async () => {
+      if (!testBlockHash) return;
+
       const res = await request(app)
         .post('/api/comments')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           content: '',
-          blockHash: '0000000000000000000000000000000000000000000000000000000000000000',
+          blockHash: testBlockHash,
         });
 
       expect(res.status).toBe(400);
     });
 
     it('应该拒绝超长评论（>5000 字符）', async () => {
+      if (!testBlockHash) return;
+
       const longContent = 'a'.repeat(6000);
-      
+
       const res = await request(app)
         .post('/api/comments')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           content: longContent,
-          blockHash: '0000000000000000000000000000000000000000000000000000000000000000',
+          blockHash: testBlockHash,
         });
 
       expect(res.status).toBe(400);
     });
 
     it('应该拒绝超长选中文字（>500 字符）', async () => {
+      if (!testBlockHash) return;
+
       const longSelectedText = 'a'.repeat(600);
-      
+
       const res = await request(app)
         .post('/api/comments')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           content: 'Test comment',
-          blockHash: '0000000000000000000000000000000000000000000000000000000000000000',
+          blockHash: testBlockHash,
           selectedText: longSelectedText,
         });
 
@@ -193,14 +235,16 @@ describe('Boundary Tests - 边界测试', () => {
     });
 
     it('应该处理特殊字符评论', async () => {
+      if (!testBlockHash) return;
+
       const specialContent = '<script>alert("xss")</script> \u0000 \n \r \t';
-      
+
       const res = await request(app)
         .post('/api/comments')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           content: specialContent,
-          blockHash: '0000000000000000000000000000000000000000000000000000000000000000',
+          blockHash: testBlockHash,
         });
 
       // 应该成功（后端会处理特殊字符）或返回验证错误

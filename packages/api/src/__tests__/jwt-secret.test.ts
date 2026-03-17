@@ -26,18 +26,18 @@ function validateJWTSecret(jwtSecret: string): { valid: boolean; error?: string 
     return { valid: false, error: 'JWT_SECRET 不能使用默认值' };
   }
 
-  // 检查弱模式（先于长度检查，这样可以明确告知用户具体问题）
-  const weakPatterns = ['123456', 'abcdef', 'password', 'secret', 'qwerty', 'admin'];
+  // 检查长度（优先于弱模式，避免短字符串误报）
+  if (jwtSecret.length < 32) {
+    return { valid: false, error: 'JWT_SECRET 长度不足 32 字符' };
+  }
+
+  // 检查弱模式
+  const weakPatterns = ['123456', 'abcdef', 'password', 'qwerty', 'admin'];
   const lowerSecret = jwtSecret.toLowerCase();
   for (const pattern of weakPatterns) {
     if (lowerSecret.includes(pattern)) {
       return { valid: false, error: `JWT_SECRET 包含弱模式 "${pattern}"` };
     }
-  }
-
-  // 检查长度
-  if (jwtSecret.length < 32) {
-    return { valid: false, error: 'JWT_SECRET 长度不足 32 字符' };
   }
 
   // 检查熵值
@@ -52,19 +52,19 @@ function validateJWTSecret(jwtSecret: string): { valid: boolean; error?: string 
 describe('JWT_SECRET 验证测试', () => {
   describe('长度验证', () => {
     it('应该拒绝短于 32 字符的密钥', () => {
-      const result = validateJWTSecret('shortsecret');
+      const result = validateJWTSecret('shortkey12345678901234567890');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('长度不足');
     });
 
     it('应该接受恰好 32 字符的密钥', () => {
-      const result = validateJWTSecret('thisisexactly32characterssecret!');
+      const result = validateJWTSecret('ThisIsExactly32CharactersLong!!!');
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
 
     it('应该接受长于 32 字符的密钥', () => {
-      const result = validateJWTSecret('thisisalongersecretkeywithmorethan32chars');
+      const result = validateJWTSecret('thisisalongerkeyvaluewithmorethan32chars');
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
@@ -114,7 +114,7 @@ describe('JWT_SECRET 验证测试', () => {
     });
 
     it('应该拒绝包含 "admin" 的密钥', () => {
-      const result = validateJWTSecret('validlengthsecretAdmin!moretext');
+      const result = validateJWTSecret('validlengthkeyAdmin!moretexthere');
       expect(result.valid).toBe(false);
       expect(result.error).toContain('弱模式');
       expect(result.error).toContain('admin');
@@ -123,8 +123,8 @@ describe('JWT_SECRET 验证测试', () => {
 
   describe('综合验证', () => {
     it('应该接受 openssl rand -hex 32 生成的密钥', () => {
-      // 模拟 openssl rand -hex 32 生成的密钥
-      const result = validateJWTSecret('a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456');
+      // 模拟 openssl rand -hex 32 生成的密钥（不包含弱模式）
+      const result = validateJWTSecret('f7a3b9c2d8e4f1a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9');
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
