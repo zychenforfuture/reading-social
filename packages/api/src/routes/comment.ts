@@ -568,27 +568,83 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // 点赞 / 取消点赞（toggle）
+// 借鉴起点读书方案：Redis 原子计数 + 异步持久化
 router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { userId } = req.user!;
 
+    // 查评论（需要 block_hash 用于广播）
+    const commentRow = await pool.query(
+      'SELECT block_hash, user_id, content FROM comments WHERE id = $1 AND is_deleted = false',
+      [id]
+    );
+    if (commentRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+    const blockHash: string = commentRow.rows[0].block_hash;
+    const authorId: string | null = commentRow.rows[0].user_id ?? null;
+    const content: string = commentRow.rows[0].content;
+
+    // 优先使用 Redis 原子操作（高并发场景）
+    const { isRedisAvailable, atomicToggleLike } = await import('../utils/likeCounter.js');
+    if (await isRedisAvailable()) {
+      const result = await atomicToggleLike(id, String(userId));
+
+      // 异步广播和通知（不阻塞响应）
+      Promise.resolve().then(async () => {
+        try {
+          const docRows = await pool.query(
+            `SELECT DISTINCT d.id AS document_id
+             FROM document_blocks db
+             JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
+             WHERE db.block_hash = $1`,
+            [blockHash]
+          );
+          for (const row of docRows.rows) {
+            broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount: result.likeCount });
+          }
+        } catch { /* 广播失败不影响响应 */ }
+
+        // 点赞时通知作者
+        if (result.liked && authorId && authorId !== userId) {
+          try {
+            const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+            const senderName = senderRow.rows[0]?.username || '有人';
+            const nd = await pool.query(
+              `SELECT d.id, d.title FROM documents d
+               JOIN document_blocks db ON db.document_id = d.id
+               WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`
+            ).then(r => r.rows[0]);
+            await createNotification({
+              userId: authorId,
+              type: 'like',
+              title: `${senderName} 点赞了你的评论`,
+              content: content?.slice(0, 100),
+              data: {
+                commentId: id,
+                documentId: nd?.id,
+                documentTitle: nd?.title,
+                blockHash,
+                originalContent: content?.slice(0, 150),
+              },
+            });
+          } catch { /* 通知失败不影响响应 */ }
+        }
+      }).catch(err => logger.warn('Async like notification failed:', err));
+
+      return res.json(result);
+    }
+
+    // Redis 不可用时降级到数据库（兜底方案）
+    // 使用 ON CONFLICT + FOR UPDATE 防止并发冲突
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // 查评论（需要 block_hash 用于广播）
-      const commentRow = await client.query(
-        'SELECT block_hash FROM comments WHERE id = $1 AND is_deleted = false',
-        [id]
-      );
-      if (commentRow.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Comment not found' });
-      }
-      const blockHash: string = commentRow.rows[0].block_hash;
+      // 锁住评论行，防止并发修改
+      await client.query('SELECT 1 FROM comments WHERE id = $1 FOR UPDATE', [id]);
 
-      // 判断是否已点赞
       const existing = await client.query(
         'SELECT 1 FROM comment_likes WHERE comment_id = $1 AND user_id = $2',
         [id, userId]
@@ -598,7 +654,6 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
       let likeCount: number;
 
       if (existing.rows.length > 0) {
-        // 取消点赞
         await client.query('DELETE FROM comment_likes WHERE comment_id = $1 AND user_id = $2', [id, userId]);
         const updated = await client.query(
           'UPDATE comments SET like_count = GREATEST(0, like_count - 1) WHERE id = $1 RETURNING like_count',
@@ -607,8 +662,12 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
         liked = false;
         likeCount = updated.rows[0].like_count;
       } else {
-        // 点赞
-        await client.query('INSERT INTO comment_likes (comment_id, user_id) VALUES ($1, $2)', [id, userId]);
+        // 使用 ON CONFLICT DO NOTHING 防止主键冲突
+        await client.query(
+          `INSERT INTO comment_likes (comment_id, user_id) VALUES ($1, $2)
+           ON CONFLICT (comment_id, user_id) DO NOTHING`,
+          [id, userId]
+        );
         const updated = await client.query(
           'UPDATE comments SET like_count = like_count + 1 WHERE id = $1 RETURNING like_count',
           [id]
@@ -619,56 +678,40 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
 
       await client.query('COMMIT');
 
-      // 广播到所有包含该 block 的文档（包含去重引用文档）
-      let broadcastDocRows: { document_id: string }[] = [];
-      try {
-        const docRows = await pool.query(
-          `SELECT DISTINCT d.id AS document_id
-           FROM document_blocks db
-           JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
-           WHERE db.block_hash = $1`,
-          [blockHash]
-        );
-        broadcastDocRows = docRows.rows;
-        for (const row of broadcastDocRows) {
-          broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount });
-        }
-      } catch { /* 广播失败不影响正常响应 */ }
+      // 广播
+      const docRows = await pool.query(
+        `SELECT DISTINCT d.id AS document_id
+         FROM document_blocks db
+         JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
+         WHERE db.block_hash = $1`,
+        [blockHash]
+      );
+      for (const row of docRows.rows) {
+        broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount });
+      }
 
-      // 点赞时通知评论作者（取消点赞不通知）
-      if (liked) {
-        try {
-          const authorRow = await pool.query(
-            'SELECT user_id, content FROM comments WHERE id = $1',
-            [id]
-          );
-          const authorId: string | null = authorRow.rows[0]?.user_id ?? null;
-          if (authorId && authorId !== userId) {
-            const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
-            const senderName: string = senderRow.rows[0]?.username || '有人';
-            const nd = broadcastDocRows[0]
-              ? await pool.query(
-                  `SELECT d.id, d.title FROM documents d
-                   JOIN document_blocks db ON db.document_id = d.id
-                   WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`,
-                  [blockHash]
-                ).then(r => r.rows[0])
-              : null;
-            await createNotification({
-              userId: authorId,
-              type: 'like',
-              title: `${senderName} 点赞了你的评论`,
-              content: (authorRow.rows[0]?.content as string | undefined)?.slice(0, 100),
-              data: {
-                commentId: id,
-                documentId: nd?.id,
-                documentTitle: nd?.title,
-                blockHash,
-                originalContent: (authorRow.rows[0]?.content as string | undefined)?.slice(0, 150),
-              },
-            });
-          }
-        } catch { /* 通知失败不影响响应 */ }
+      // 通知作者
+      if (liked && authorId && authorId !== userId) {
+        const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+        const senderName = senderRow.rows[0]?.username || '有人';
+        const nd = await pool.query(
+          `SELECT d.id, d.title FROM documents d
+           JOIN document_blocks db ON db.document_id = d.id
+           WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`
+        ).then(r => r.rows[0]);
+        await createNotification({
+          userId: authorId,
+          type: 'like',
+          title: `${senderName} 点赞了你的评论`,
+          content: content?.slice(0, 100),
+          data: {
+            commentId: id,
+            documentId: nd?.id,
+            documentTitle: nd?.title,
+            blockHash,
+            originalContent: content?.slice(0, 150),
+          },
+        });
       }
 
       res.json({ liked, likeCount });

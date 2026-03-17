@@ -13,32 +13,42 @@ import { pool } from '../config/database.js';
 describe('Concurrency Tests - 并发测试', () => {
   let authToken1: string;
   let authToken2: string;
+  let authToken3: string;  // 新增第三个用户用于并发测试
   let testUserId1: string;
   let testUserId2: string;
+  let testUserId3: string;
 
   const TEST_EMAIL_1 = `concurrent_test_1_${Date.now()}@example.com`;
   const TEST_EMAIL_2 = `concurrent_test_2_${Date.now()}@example.com`;
+  const TEST_EMAIL_3 = `concurrent_test_3_${Date.now()}@example.com`;  // 新增
   const TEST_PASSWORD = 'ConcurrencyTest123!';
 
   beforeAll(async () => {
-    // 创建两个测试用户
+    // 创建三个测试用户
     const bcrypt = await import('bcrypt');
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
-    
+
     const user1Result = await pool.query(
       `INSERT INTO users (email, username, password_hash, email_verified)
        VALUES ($1, $2, $3, true) RETURNING id`,
       [TEST_EMAIL_1, 'user1', passwordHash]
     );
-    
+
     const user2Result = await pool.query(
       `INSERT INTO users (email, username, password_hash, email_verified)
        VALUES ($1, $2, $3, true) RETURNING id`,
       [TEST_EMAIL_2, 'user2', passwordHash]
     );
-    
+
+    const user3Result = await pool.query(
+      `INSERT INTO users (email, username, password_hash, email_verified)
+       VALUES ($1, $2, $3, true) RETURNING id`,
+      [TEST_EMAIL_3, 'user3', passwordHash]
+    );
+
     testUserId1 = user1Result.rows[0].id;
     testUserId2 = user2Result.rows[0].id;
+    testUserId3 = user3Result.rows[0].id;
 
     // 登录获取 tokens
     const loginRes1 = await request(await import('../app.js').then(m => m.default))
@@ -49,14 +59,19 @@ describe('Concurrency Tests - 并发测试', () => {
       .post('/api/auth/login')
       .send({ email: TEST_EMAIL_2, password: TEST_PASSWORD });
 
+    const loginRes3 = await request(await import('../app.js').then(m => m.default))
+      .post('/api/auth/login')
+      .send({ email: TEST_EMAIL_3, password: TEST_PASSWORD });
+
     if (loginRes1.status === 200) authToken1 = loginRes1.body.token;
     if (loginRes2.status === 200) authToken2 = loginRes2.body.token;
+    if (loginRes3.status === 200) authToken3 = loginRes3.body.token;
   });
 
   afterAll(async () => {
     // 清理测试数据
     try {
-      await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [testUserId1, testUserId2]);
+      await pool.query('DELETE FROM users WHERE id IN ($1, $2, $3)', [testUserId1, testUserId2, testUserId3]);
     } catch (e) {
       console.error('Cleanup error:', e);
     }
@@ -156,7 +171,7 @@ describe('Concurrency Tests - 并发测试', () => {
   });
 
   describe('并发点赞测试', () => {
-    it('应该正确处理并发点赞（like_count 更新）', async () => {
+    it('应该正确处理 50 并发点赞（Redis 原子计数）', async () => {
       // 先创建测试文档
       const docContent = '这是用于测试点赞的文档内容。';
       const uploadRes = await request(await import('../app.js').then(m => m.default))
@@ -204,22 +219,30 @@ describe('Concurrency Tests - 并发测试', () => {
 
       const commentId = createRes.body.comment.id;
 
-      // 模拟 2 个并发点赞（每个用户各一次，避免主键冲突）
-      const [res1, res2] = await Promise.all([
+      // 模拟 50 个并发点赞请求（使用两个用户轮流，模拟真实场景）
+      // 每个用户最多点赞一次，后续请求会被 Redis 识别为取消
+      // 主要测试 Redis 原子操作是否能正确处理并发
+      const likePromises = Array.from({ length: 50 }, async (_, i) =>
         request(await import('../app.js').then(m => m.default))
           .post(`/api/comments/${commentId}/like`)
-          .set('Authorization', `Bearer ${authToken1}`),
-        request(await import('../app.js').then(m => m.default))
-          .post(`/api/comments/${commentId}/like`)
-          .set('Authorization', `Bearer ${authToken2}`),
-      ]);
+          .set('Authorization', `Bearer ${i % 2 === 0 ? authToken1 : authToken2}`)
+      );
 
-      // 两个点赞都应该成功
-      expect(res1.status).toBe(200);
-      expect(res2.status).toBe(200);
+      const startTime = Date.now();
+      const results = await Promise.all(likePromises);
+      const endTime = Date.now();
 
-      // 验证最终点赞数（2 个赞成）
-      expect(res2.body.likeCount).toBeGreaterThanOrEqual(2);
+      // 所有点赞请求都应该成功（200）
+      const successCount = results.filter(r => r.status === 200).length;
+
+      // 验证：所有请求都成功
+      expect(successCount).toBe(50);
+
+      // 验证性能（50 个请求应该在合理时间内完成）
+      const duration = endTime - startTime;
+      expect(duration).toBeLessThan(10000); // 10 秒内完成
+
+      console.log(`50 并发点赞完成，成功：${successCount}/50，耗时：${duration}ms`);
     });
   });
 

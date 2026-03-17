@@ -135,8 +135,52 @@ export const api: {
     }),
   deleteComment: (id: string) =>
     api.request<unknown>(`/comments/${id}`, { method: 'DELETE' }),
+
   likeComment: (id: string) =>
     api.request<{ liked: boolean; likeCount: number }>(`/comments/${id}/like`, { method: 'POST' }),
+};
+
+// 点赞防抖聚合（借鉴起点读书方案）
+// 用户连续点击时，本地累加计数，延迟后合并发送一次请求
+const likePending = new Map<string, { count: number; timer?: NodeJS.Timeout }>();
+
+/**
+ * 点赞（带防抖聚合）
+ * 用户连续点击多次只发送一次请求，提升用户体验并减少服务器压力
+ */
+export function likeCommentWithDebounce(commentId: string): Promise<{ liked: boolean; likeCount: number }> {
+  // 本地累加
+  const current = likePending.get(commentId) || { count: 0 };
+  current.count += 1;
+  likePending.set(commentId, current);
+
+  // 清除之前的定时器
+  if (current.timer) {
+    clearTimeout(current.timer);
+  }
+
+  // 500ms 防抖：停止点击后发送
+  return new Promise((resolve, reject) => {
+    current.timer = setTimeout(async () => {
+      try {
+        const pending = likePending.get(commentId);
+        if (!pending || pending.count === 0) {
+          resolve({ liked: false, likeCount: 0 });
+          return;
+        }
+
+        // 实际只发送一次点赞请求（toggle 模式）
+        // 后端 Redis 会处理并发，前端聚合只减少请求次数
+        const result = await api.likeComment(commentId);
+        likePending.delete(commentId);
+        resolve(result);
+      } catch (err) {
+        likePending.delete(commentId);
+        reject(err);
+      }
+    }, 300);
+  });
+}
 
   // Blocks
   getBlock: (hash: string) => api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),

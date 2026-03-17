@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type Comment, cn } from '../lib/utils';
+import { api, type Comment, cn, likeCommentWithDebounce } from '../lib/utils';
 import { useUserStore } from '../stores/userStore';
 import CommentHeader from './comment/CommentHeader';
 import CommentForm from './comment/CommentForm';
@@ -78,7 +78,7 @@ export default function CommentPanel({
   });
 
   const likeMutation = useMutation({
-    mutationFn: (commentId: string) => api.likeComment(commentId),
+    mutationFn: (commentId: string) => likeCommentWithDebounce(commentId),
     onMutate: async (commentId: string) => {
       await queryClient.cancelQueries({ queryKey: ['document-comments', documentId] });
       const previous = queryClient.getQueryData<CommentsCache>(['document-comments', documentId]);
