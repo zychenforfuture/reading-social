@@ -11,6 +11,7 @@ import { documentRoutes } from './routes/document.js';
 import { commentRoutes } from './routes/comment.js';
 import { blockRoutes } from './routes/block.js';
 import { notificationRoutes } from './routes/notification.js';
+import { adminRoutes } from './routes/admin.js';
 import { swaggerUi, swaggerSpec } from './swagger.js';
 
 const app: Express = express();
@@ -57,6 +58,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/blocks', blockRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 处理
 app.use((req: Request, res: Response) => {

@@ -1,6 +1,6 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
-import { FileText, LogOut, Menu, X } from 'lucide-react';
+import { FileText, LogOut, Menu, X, Shield } from 'lucide-react';
 import { useState } from 'react';
 import NotificationBell from './NotificationBell';
 
@@ -31,6 +31,12 @@ export default function Layout() {
               <Link to="/profile" className="transition-colors hover:text-foreground/80 text-foreground/60">
                 个人中心
               </Link>
+              {isAuthenticated && user?.is_admin && (
+                <Link to="/admin" className="transition-colors hover:text-teal-600 text-teal-600 font-semibold flex items-center gap-1">
+                  <Shield size={16} />
+                  管理面板
+                </Link>
+              )}
             </nav>
           </div>
           <div className="flex flex-1 items-center justify-end space-x-2">
@@ -88,9 +94,17 @@ export default function Layout() {
               文档列表
             </Link>
             {isAuthenticated && (
-              <Link to="/profile" className="block text-sm font-medium">
-                个人中心
-              </Link>
+              <>
+                <Link to="/profile" className="block text-sm font-medium">
+                  个人中心
+                </Link>
+                {user?.is_admin && (
+                  <Link to="/admin" className="block text-sm font-medium text-teal-600 flex items-center gap-1">
+                    <Shield size={16} />
+                    管理面板
+                  </Link>
+                )}
+              </>
             )}
           </nav>
         </div>
