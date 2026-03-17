@@ -26,6 +26,15 @@ function validateJWTSecret(jwtSecret: string): { valid: boolean; error?: string 
     return { valid: false, error: 'JWT_SECRET 不能使用默认值' };
   }
 
+  // 检查弱模式（先于长度检查，这样可以明确告知用户具体问题）
+  const weakPatterns = ['123456', 'abcdef', 'password', 'secret', 'qwerty', 'admin'];
+  const lowerSecret = jwtSecret.toLowerCase();
+  for (const pattern of weakPatterns) {
+    if (lowerSecret.includes(pattern)) {
+      return { valid: false, error: `JWT_SECRET 包含弱模式 "${pattern}"` };
+    }
+  }
+
   // 检查长度
   if (jwtSecret.length < 32) {
     return { valid: false, error: 'JWT_SECRET 长度不足 32 字符' };
@@ -35,15 +44,6 @@ function validateJWTSecret(jwtSecret: string): { valid: boolean; error?: string 
   const entropy = estimateEntropy(jwtSecret);
   if (entropy < 3.5) {
     return { valid: false, error: `JWT_SECRET 熵值过低 (${entropy.toFixed(2)} < 3.5)` };
-  }
-
-  // 检查弱模式
-  const weakPatterns = ['123456', 'abcdef', 'password', 'secret', 'qwerty', 'admin'];
-  const lowerSecret = jwtSecret.toLowerCase();
-  for (const pattern of weakPatterns) {
-    if (lowerSecret.includes(pattern)) {
-      return { valid: false, error: `JWT_SECRET 包含弱模式 "${pattern}"` };
-    }
   }
 
   return { valid: true };
