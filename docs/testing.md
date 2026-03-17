@@ -49,7 +49,9 @@ pnpm --filter @collab/api test --coverage
 docker compose -f docker-compose.test.yml down
 ```
 
-## 3. 当前 API 测试文件（9 个）
+## 3. 当前测试文件
+
+### API 测试文件（10 个）
 
 - auth.test.ts
 - auth-integration.test.ts
@@ -60,6 +62,23 @@ docker compose -f docker-compose.test.yml down
 - boundary.test.ts
 - middleware.test.ts
 - types.test.ts
+- performance.test.ts（性能基准测试）
+
+### Web 测试文件（3 个）
+
+运行命令：`pnpm --filter @collab/web test run`
+
+- src/components/Button.test.tsx（5 个测试）
+- src/lib/utils.test.ts（16 个测试）：cn()、timeAgo()
+- src/utils/chapterUtils.test.ts（13 个测试）：buildChapters()
+
+### Worker 测试文件（3 个）
+
+运行命令：`pnpm --filter @collab/worker test`
+
+- src/__tests__/simhash.test.ts（15 个测试）
+- src/__tests__/embedding.test.ts（2 个测试）
+- src/__tests__/worker.integration.test.ts（2 个测试）
 
 ## 4. 常见问题
 
@@ -91,4 +110,4 @@ pnpm --filter @collab/api test --coverage
 open packages/api/coverage/index.html
 ```
 
-更新时间：2026-03-14
+更新时间：2026-03-17
