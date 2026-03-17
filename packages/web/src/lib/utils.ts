@@ -37,6 +37,15 @@ export const api: {
   markNotificationsReadBatch: (ids: string[]) => Promise<unknown>;
   deleteNotification: (id: string) => Promise<unknown>;
   deleteNotificationsBatch: (ids: string[]) => Promise<unknown>;
+  // Admin
+  getAdminStats: () => Promise<AdminStats>;
+  getAdminUsers: (params?: { page?: number; limit?: number; search?: string }) => Promise<{ users: AdminUser[]; pagination: Pagination }>;
+  updateAdminUser: (id: string, updates: { is_admin?: boolean }) => Promise<{ user: User }>;
+  deleteAdminUser: (id: string) => Promise<{ message: string }>;
+  getAdminDocuments: (params?: { page?: number; limit?: number; status?: string; search?: string }) => Promise<{ documents: AdminDocument[]; pagination: Pagination }>;
+  deleteAdminDocument: (id: string) => Promise<{ message: string }>;
+  getAdminComments: (params?: { page?: number; limit?: number; search?: string }) => Promise<{ comments: AdminComment[]; pagination: Pagination }>;
+  deleteAdminComment: (id: string) => Promise<{ message: string }>;
 } = {
   // @ts-ignore - Vite 环境变量
   baseURL: import.meta.env?.VITE_API_URL || '/api',
@@ -171,6 +180,42 @@ export const api: {
     api.request<unknown>(`/notifications/${id}`, { method: 'DELETE' }),
   deleteNotificationsBatch: (ids: string[]) =>
     api.request<unknown>('/notifications/delete-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
+
+  // Admin
+  getAdminStats: () => api.request<AdminStats>('/admin/stats'),
+  getAdminUsers: (params?: { page?: number; limit?: number; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.page !== undefined) q.set('page', String(params.page));
+    if (params?.limit !== undefined) q.set('limit', String(params.limit));
+    if (params?.search) q.set('search', params.search);
+    const qs = q.toString();
+    return api.request<{ users: AdminUser[]; pagination: Pagination }>(`/admin/users${qs ? '?' + qs : ''}`);
+  },
+  updateAdminUser: (id: string, updates: { is_admin?: boolean }) =>
+    api.request<{ user: User }>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(updates) }),
+  deleteAdminUser: (id: string) =>
+    api.request<{ message: string }>(`/admin/users/${id}`, { method: 'DELETE' }),
+  getAdminDocuments: (params?: { page?: number; limit?: number; status?: string; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.page !== undefined) q.set('page', String(params.page));
+    if (params?.limit !== undefined) q.set('limit', String(params.limit));
+    if (params?.status) q.set('status', params.status);
+    if (params?.search) q.set('search', params.search);
+    const qs = q.toString();
+    return api.request<{ documents: AdminDocument[]; pagination: Pagination }>(`/admin/documents${qs ? '?' + qs : ''}`);
+  },
+  deleteAdminDocument: (id: string) =>
+    api.request<{ message: string }>(`/admin/documents/${id}`, { method: 'DELETE' }),
+  getAdminComments: (params?: { page?: number; limit?: number; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.page !== undefined) q.set('page', String(params.page));
+    if (params?.limit !== undefined) q.set('limit', String(params.limit));
+    if (params?.search) q.set('search', params.search);
+    const qs = q.toString();
+    return api.request<{ comments: AdminComment[]; pagination: Pagination }>(`/admin/comments${qs ? '?' + qs : ''}`);
+  },
+  deleteAdminComment: (id: string) =>
+    api.request<{ message: string }>(`/admin/comments/${id}`, { method: 'DELETE' }),
 };
 
 // 点赞防抖聚合（借鉴起点读书方案）
@@ -285,6 +330,55 @@ export type SimilarBlock = {
   algorithm: string;
   raw_content: string;
   occurrence_count: number;
+};
+
+export type Pagination = {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+export type AdminStats = {
+  users: {
+    total: number;
+    admins: number;
+    recent: number;
+  };
+  documents: {
+    total: number;
+    ready: number;
+    processing: number;
+    error: number;
+    totalWords: number;
+    recent: number;
+  };
+  comments: {
+    total: number;
+    recent: number;
+  };
+  blocks: {
+    total: number;
+  };
+};
+
+export type AdminUser = User & {
+  document_count: number;
+  comment_count: number;
+  email_verified: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminDocument = Document & {
+  uploader: string;
+  uploader_email: string;
+  comment_count: number;
+};
+
+export type AdminComment = Comment & {
+  email: string;
+  block_content: string;
 };
 
 export function timeAgo(dateStr: string) {
