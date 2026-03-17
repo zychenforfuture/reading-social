@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
-import pool from '../config/database.js';
+import { pool } from '../config/database.js';
 
-const router = Router();
+const router: Router = Router();
 
 // 所有管理员路由都需要认证和管理员权限
 router.use(authenticate, requireAdmin);

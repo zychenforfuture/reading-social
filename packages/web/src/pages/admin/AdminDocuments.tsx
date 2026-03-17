@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tantml:react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, timeAgo } from '../../lib/utils';
 import { Search, Trash2, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
