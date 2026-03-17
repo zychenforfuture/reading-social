@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { authenticate, optionalAuth } from '../middleware/auth.js';
+import { authenticate, optionalAuth, type AuthPayload } from '../middleware/auth.js';
 import { createNotification } from '../utils/notifications.js';
 import { cleanText } from '../utils/clean.js';
 
@@ -572,7 +572,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { userId } = req.user!;
+    const userId = (req.user as AuthPayload).userId;
 
     // 查评论（需要 block_hash 用于广播）
     const commentRow = await pool.query(
@@ -589,7 +589,7 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
     // 优先使用 Redis 原子操作（高并发场景）
     const { isRedisAvailable, atomicToggleLike } = await import('../utils/likeCounter.js');
     if (await isRedisAvailable()) {
-      const result = await atomicToggleLike(id, String(userId));
+      const result = await atomicToggleLike(String(id), String(userId));
 
       // 异步广播和通知（不阻塞响应）
       Promise.resolve().then(async () => {

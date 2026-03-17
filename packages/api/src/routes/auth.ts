@@ -1,10 +1,10 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { sendOTPEmail } from '../utils/email.js';
-import { generateToken, authenticate } from '../middleware/auth.js';
+import { generateToken, authenticate, type AuthPayload } from '../middleware/auth.js';
 
 const router: Router = Router();
 
@@ -437,7 +437,7 @@ router.put('/change-password', authenticate, async (req, res) => {
 // POST /auth/admin/sync — 管理员触发同步（无需重启）
 router.post('/admin/sync', authenticate, async (req: Request, res: Response) => {
   try {
-    const { userId } = req.user!;
+    const userId = (req.user as AuthPayload).userId;
     const adminCheck = await pool.query('SELECT is_admin FROM users WHERE id = $1', [userId]);
     if (!adminCheck.rows[0]?.is_admin) {
       return res.status(403).json({ error: 'Forbidden' });

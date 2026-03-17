@@ -138,6 +138,39 @@ export const api: {
 
   likeComment: (id: string) =>
     api.request<{ liked: boolean; likeCount: number }>(`/comments/${id}/like`, { method: 'POST' }),
+
+  // Blocks
+  getBlock: (hash: string) => api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),
+  getBlockSimilar: (hash: string) =>
+    api.request<{ similar?: SimilarBlock[] }>(`/blocks/${hash}/similar`),
+
+  // Profile
+  updateProfile: (avatarUrl: string) =>
+    api.request<{ user: User }>('/auth/profile', { method: 'PUT', body: JSON.stringify({ avatar_url: avatarUrl }) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    api.request<{ message: string }>('/auth/change-password', { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) }),
+
+  // Notifications
+  getUnreadNotificationCount: () =>
+    api.request<{ count: number }>('/notifications/unread-count'),
+  getNotifications: (params?: { unread?: boolean; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.unread !== undefined) q.set('unread', String(params.unread));
+    if (params?.limit   !== undefined) q.set('limit',  String(params.limit));
+    if (params?.offset  !== undefined) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    return api.request<{ notifications: Notification[]; total: number }>(`/notifications${qs ? '?' + qs : ''}`);
+  },
+  markNotificationRead: (id: string) =>
+    api.request<unknown>(`/notifications/${id}/read`, { method: 'PUT' }),
+  markAllNotificationsRead: () =>
+    api.request<unknown>('/notifications/read-all', { method: 'PUT' }),
+  markNotificationsReadBatch: (ids: string[]) =>
+    api.request<unknown>('/notifications/read-batch', { method: 'PUT', body: JSON.stringify({ ids }) }),
+  deleteNotification: (id: string) =>
+    api.request<unknown>(`/notifications/${id}`, { method: 'DELETE' }),
+  deleteNotificationsBatch: (ids: string[]) =>
+    api.request<unknown>('/notifications/delete-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
 };
 
 // 点赞防抖聚合（借鉴起点读书方案）
@@ -181,40 +214,6 @@ export function likeCommentWithDebounce(commentId: string): Promise<{ liked: boo
     }, 300);
   });
 }
-
-  // Blocks
-  getBlock: (hash: string) => api.request<{ block?: ContentBlock; documents?: Document[] }>(`/blocks/${hash}`),
-  getBlockSimilar: (hash: string) =>
-    api.request<{ similar?: SimilarBlock[] }>(`/blocks/${hash}/similar`),
-
-  // Profile
-  updateProfile: (avatarUrl: string) =>
-    api.request<{ user: User }>('/auth/profile', { method: 'PUT', body: JSON.stringify({ avatar_url: avatarUrl }) }),
-  changePassword: (oldPassword: string, newPassword: string) =>
-    api.request<{ message: string }>('/auth/change-password', { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) }),
-
-  // Notifications
-  getUnreadNotificationCount: () =>
-    api.request<{ count: number }>('/notifications/unread-count'),
-  getNotifications: (params?: { unread?: boolean; limit?: number; offset?: number }) => {
-    const q = new URLSearchParams();
-    if (params?.unread !== undefined) q.set('unread', String(params.unread));
-    if (params?.limit   !== undefined) q.set('limit',  String(params.limit));
-    if (params?.offset  !== undefined) q.set('offset', String(params.offset));
-    const qs = q.toString();
-    return api.request<{ notifications: Notification[]; total: number }>(`/notifications${qs ? '?' + qs : ''}`);
-  },
-  markNotificationRead: (id: string) =>
-    api.request<unknown>(`/notifications/${id}/read`, { method: 'PUT' }),
-  markAllNotificationsRead: () =>
-    api.request<unknown>('/notifications/read-all', { method: 'PUT' }),
-  markNotificationsReadBatch: (ids: string[]) =>
-    api.request<unknown>('/notifications/read-batch', { method: 'PUT', body: JSON.stringify({ ids }) }),
-  deleteNotification: (id: string) =>
-    api.request<unknown>(`/notifications/${id}`, { method: 'DELETE' }),
-  deleteNotificationsBatch: (ids: string[]) =>
-    api.request<unknown>('/notifications/delete-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
-};
 
 export type User = {
   id: string;
