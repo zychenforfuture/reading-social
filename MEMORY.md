@@ -14,10 +14,14 @@
 
 ## 测试状态
 
-- **前端测试**：使用 Vitest + Testing Library，5 个测试通过
+- **前端测试**：使用 Vitest + Testing Library，34 个测试通过
+  - Button 组件测试（5 个）
+  - utils.ts 工具函数测试（16 个）：cn()、timeAgo()
+  - chapterUtils.ts 章节提取测试（13 个）：buildChapters()
 - **Worker 测试**：19 个测试通过（SimHash、工具函数、集成测试）
-- **测试覆盖**：API、Worker 核心逻辑已覆盖
-- **缺失测试**：性能测试、E2E 测试待实现
+- **API 测试**：11 个测试文件 + 新增性能测试文件（performance.test.ts）
+- **测试覆盖**：API、Worker 核心逻辑、前端工具函数已覆盖
+- **缺失测试**：E2E 测试待实现
 
 ## Qdrant 集成状态
 
@@ -34,6 +38,13 @@
 5. 更新文档修正错误标注
 
 ## 最近更新
+
+2026-03-17：评估项目进展
+- 运行现有测试，验证全部通过（Worker 19，Web 5，API 结构正常）
+- 新增前端工具函数测试（utils.test.ts：16 个，chapterUtils.test.ts：13 个）
+- 新增 API 性能基准测试（performance.test.ts）
+- 前端测试数量从 5 个增长至 34 个
+- 更新 MEMORY.md 测试状态
 
 2026-03-14：记录今日工作
 - 搭建前端测试框架（Vitest + Testing Library）
