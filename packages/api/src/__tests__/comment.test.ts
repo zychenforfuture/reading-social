@@ -54,16 +54,22 @@ describe('Comment System Tests', () => {
 
     testDocumentId = uploadRes.body.document.id;
 
-    // 等待文档处理完成（模拟）
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // 等待文档状态变为 ready（轮询检查，最多 10 秒）
+    for (let i = 0; i < 20; i++) {
+      const statusRes = await request(app)
+        .get(`/api/documents/${testDocumentId}`)
+        .set('Authorization', `Bearer ${authToken}`);
 
-    // 获取文档内容块
-    const docRes = await request(app)
-      .get(`/api/documents/${testDocumentId}`)
-      .set('Authorization', `Bearer ${authToken}`);
+      if (statusRes.body.document?.status === 'ready' && statusRes.body.content?.length > 0) {
+        testBlockHash = statusRes.body.content[0].block_hash;
+        break;
+      }
 
-    if (docRes.body.content && docRes.body.content.length > 0) {
-      testBlockHash = docRes.body.content[0].block_hash;
+      if (i === 19) {
+        throw new Error(`Document ${testDocumentId} did not become ready in time. Status: ${statusRes.body.document?.status}, Content length: ${statusRes.body.content?.length}`);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   });
 
@@ -388,8 +394,8 @@ describe('Comment System Tests', () => {
          RETURNING id`,
         [SORTED_TEST_EMAIL, SORTED_TEST_USERNAME, passwordHash]
       );
-      
-      const userId = userResult.rows[0].id;
+
+      testSortedUserId = userResult.rows[0].id;
 
       // 登录获取 token
       const loginRes = await request(app)
@@ -412,13 +418,22 @@ describe('Comment System Tests', () => {
 
       testSortedDocumentId = uploadRes.body.document.id;
 
-      // 获取第一个 block_hash
-      const docRes = await request(app)
-        .get(`/api/documents/${testSortedDocumentId}`)
-        .set('Authorization', `Bearer ${sortedAuthToken}`);
+      // 等待文档状态变为 ready（轮询检查，最多 10 秒）
+      for (let i = 0; i < 20; i++) {
+        const docRes = await request(app)
+          .get(`/api/documents/${testSortedDocumentId}`)
+          .set('Authorization', `Bearer ${sortedAuthToken}`);
 
-      if (docRes.body.content && docRes.body.content.length > 0) {
-        blockHash = docRes.body.content[0].block_hash;
+        if (docRes.body.document?.status === 'ready' && docRes.body.content?.length > 0) {
+          blockHash = docRes.body.content[0].block_hash;
+          break;
+        }
+
+        if (i === 19) {
+          throw new Error(`Document ${testSortedDocumentId} did not become ready in time`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     });
 

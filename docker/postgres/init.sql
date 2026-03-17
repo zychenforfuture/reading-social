@@ -4,7 +4,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 使用 gen_random_uuid() 需要 pgcrypto
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
--- 尝试启用 pgvector（如果宿主镜像已安装此扩展）
+-- pgvector 扩展（可选，如果镜像支持）
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- 用户表
