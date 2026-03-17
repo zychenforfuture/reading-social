@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import app from '../app.js';
 import { pool } from '../config/database.js';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 
 const TEST_EMAIL = `integration_${Date.now()}@example.com`;
 const TEST_PASSWORD = 'SecurePass123!';

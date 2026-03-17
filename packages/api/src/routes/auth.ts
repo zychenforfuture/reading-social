@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { sendOTPEmail } from '../utils/email.js';

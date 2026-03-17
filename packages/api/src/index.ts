@@ -1,3 +1,21 @@
+/**
+ * 共鸣阅读 API 服务启动入口
+ *
+ * JWT_SECRET 安全说明：
+ * - JWT_SECRET 用于签名和验证 JWT 令牌，泄露将导致严重安全风险
+ * - 启动时会强制验证 JWT_SECRET 的复杂度：
+ *   1. 长度至少 32 字符
+ *   2. 熵值至少 3.5 比特/字符（确保随机性）
+ *   3. 不能包含常见弱模式（如 "password"、"123456" 等）
+ *   4. 不能使用默认值 "dev-secret-change-in-prod"
+ *
+ * 生成安全的 JWT_SECRET：
+ *   $ openssl rand -hex 32
+ *   $ openssl rand -base64 32
+ *
+ * 生产环境部署前务必更换为随机生成的强密钥！
+ */
+
 import app from './app.js';
 import { logger } from './config/logger.js';
 import { pool } from './config/database.js';
@@ -8,6 +26,7 @@ const PORT = process.env.PORT || 3000;
 
 /**
  * 计算字符串的熵值（估算）
+ * 熵值越高，随机性越强，安全性越好
  */
 function estimateEntropy(str: string): number {
   const freq = new Map<string, number>();

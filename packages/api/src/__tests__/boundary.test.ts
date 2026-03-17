@@ -18,7 +18,7 @@ const TEST_USERNAME = 'boundary_tester';
 describe('Boundary Tests - 边界测试', () => {
   beforeAll(async () => {
     // 创建测试用户
-    const bcrypt = await import('bcryptjs');
+    const bcrypt = await import('bcrypt');
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     
     const userResult = await pool.query(

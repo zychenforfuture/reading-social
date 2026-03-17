@@ -9,7 +9,7 @@
 
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 
 const SALT_ROUNDS = 10;
 

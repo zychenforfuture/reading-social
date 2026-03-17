@@ -21,7 +21,7 @@ const TEST_USERNAME = 'comment_tester';
 describe('Comment System Tests', () => {
   beforeAll(async () => {
     // 创建测试用户
-    const bcrypt = await import('bcryptjs');
+    const bcrypt = await import('bcrypt');
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     
     const userResult = await pool.query(
@@ -307,7 +307,7 @@ describe('Comment System Tests', () => {
       if (!testCommentId) return;
 
       // 创建另一个用户
-      const bcrypt = await import('bcryptjs');
+      const bcrypt = await import('bcrypt');
       const otherPassword = 'OtherUser123!';
       const passwordHash = await bcrypt.hash(otherPassword, 10);
       
@@ -379,7 +379,7 @@ describe('Comment System Tests', () => {
 
     beforeAll(async () => {
       // 创建测试用户
-      const bcrypt = await import('bcryptjs');
+      const bcrypt = await import('bcrypt');
       const passwordHash = await bcrypt.hash(SORTED_TEST_PASSWORD, 10);
       
       const userResult = await pool.query(

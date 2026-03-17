@@ -22,7 +22,7 @@ describe('Concurrency Tests - 并发测试', () => {
 
   beforeAll(async () => {
     // 创建两个测试用户
-    const bcrypt = await import('bcryptjs');
+    const bcrypt = await import('bcrypt');
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     
     const user1Result = await pool.query(

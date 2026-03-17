@@ -19,7 +19,7 @@ const TEST_USERNAME = 'doc_tester';
 describe('Document Management Tests', () => {
   beforeAll(async () => {
     // 创建测试用户
-    const bcrypt = await import('bcryptjs');
+    const bcrypt = await import('bcrypt');
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     
     const userResult = await pool.query(
@@ -191,7 +191,7 @@ describe('Document Management Tests', () => {
 
     it('应该拒绝删除他人文档', async () => {
       // 创建另一个用户
-      const bcrypt = await import('bcryptjs');
+      const bcrypt = await import('bcrypt');
       const otherPassword = 'OtherUser123!';
       const passwordHash = await bcrypt.hash(otherPassword, 10);
       
@@ -265,7 +265,7 @@ describe('Document Management Tests', () => {
 
     beforeAll(async () => {
       // 创建第二个测试用户
-      const bcrypt = await import('bcryptjs');
+      const bcrypt = await import('bcrypt');
       const passwordHash = await bcrypt.hash(DEUTSCH_PASSWORD, 10);
       
       const userResult = await pool.query(
