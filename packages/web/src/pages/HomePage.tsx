@@ -77,8 +77,11 @@ export default function HomePage() {
     if (!file) return;
     setUploadError('');
 
-    if (!file.name.toLowerCase().endsWith('.txt')) {
-      setUploadError('仅支持 .txt 格式的文件');
+    const isTxt = file.name.toLowerCase().endsWith('.txt');
+    const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+
+    if (!isTxt && !isPdf) {
+      setUploadError('仅支持 .txt 或 .pdf 格式的文件');
       e.target.value = '';
       return;
     }
@@ -154,7 +157,7 @@ export default function HomePage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".txt"
+            accept=".txt,.pdf"
             className="hidden"
             onChange={handleFileUpload}
           />
@@ -164,7 +167,7 @@ export default function HomePage() {
             className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/80 bg-secondary h-9 px-4 py-2 text-secondary-foreground disabled:opacity-50"
           >
             <Upload className="h-4 w-4 mr-2" />
-            上传 TXT
+            上传 TXT/PDF
           </button>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}

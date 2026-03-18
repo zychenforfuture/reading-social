@@ -121,6 +121,7 @@ cp .env.production.example .env.production
 - 评论绑定内容块（sentence_hash），而非文档 URL
 - SSE 实时更新
 - 跨文档评论重映射支持
+- 支持 TXT/PDF 文档上传（PDF 自动提取文字后处理）
 
 ### 相似检测
 - SimHash：64 位指纹，海明距离阈值 <= 3
