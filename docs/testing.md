@@ -51,7 +51,7 @@ docker compose -f docker-compose.test.yml down
 
 ## 3. 当前测试文件
 
-### API 测试文件（10 个）
+### API 测试文件（11 个）
 
 - auth.test.ts
 - auth-integration.test.ts
@@ -62,15 +62,18 @@ docker compose -f docker-compose.test.yml down
 - boundary.test.ts
 - middleware.test.ts
 - types.test.ts
+- jwt-secret.test.ts（JWT 密钥复杂度验证）
 - performance.test.ts（性能基准测试）
 
-### Web 测试文件（3 个）
+### Web 测试文件（3 个文件，34 个测试用例）
 
 运行命令：`pnpm --filter @collab/web test run`
 
 - src/components/Button.test.tsx（5 个测试）
 - src/lib/utils.test.ts（16 个测试）：cn()、timeAgo()
 - src/utils/chapterUtils.test.ts（13 个测试）：buildChapters()
+
+**总计：34 个测试用例**
 
 ### Worker 测试文件（3 个）
 
