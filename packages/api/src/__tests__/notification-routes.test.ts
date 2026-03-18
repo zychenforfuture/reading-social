@@ -41,14 +41,14 @@ describe('Notification Routes', () => {
     vi.restoreAllMocks();
   });
 
-  describe('GET /api/notification/unread-count', () => {
+  describe('GET /api/notifications/unread-count', () => {
     it('should return unread notification count', async () => {
       (pool.query as any).mockResolvedValueOnce({
         rows: [{ count: '5' }],
       });
 
       const res = await request(app)
-        .get('/api/notification/unread-count')
+        .get('/api/notifications/unread-count')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(200);
@@ -63,7 +63,7 @@ describe('Notification Routes', () => {
       (pool.query as any).mockRejectedValueOnce(new Error('Database error'));
 
       const res = await request(app)
-        .get('/api/notification/unread-count')
+        .get('/api/notifications/unread-count')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(500);
@@ -71,12 +71,12 @@ describe('Notification Routes', () => {
     });
   });
 
-  describe('PUT /api/notification/read-all', () => {
+  describe('PUT /api/notifications/read-all', () => {
     it('should mark all notifications as read', async () => {
       (pool.query as any).mockResolvedValueOnce({});
 
       const res = await request(app)
-        .put('/api/notification/read-all')
+        .put('/api/notifications/read-all')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(200);
@@ -91,7 +91,7 @@ describe('Notification Routes', () => {
       (pool.query as any).mockRejectedValueOnce(new Error('Database error'));
 
       const res = await request(app)
-        .put('/api/notification/read-all')
+        .put('/api/notifications/read-all')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(500);
@@ -99,13 +99,13 @@ describe('Notification Routes', () => {
     });
   });
 
-  describe('PUT /api/notification/read-batch', () => {
+  describe('PUT /api/notifications/read-batch', () => {
     it('should mark batch notifications as read with valid input', async () => {
-      (pool.query as any).mockResolvedValueOnce({});
-      const notificationIds = ['id1', 'id2', 'id3'];
+      (pool.query as any).mockResolvedValueOnce({ rows: [] });
+      const notificationIds = ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002'];
 
       const res = await request(app)
-        .put('/api/notification/read-batch')
+        .put('/api/notifications/read-batch')
         .send({ ids: notificationIds })
         .set('Authorization', `Bearer ${mockToken}`);
 
@@ -119,7 +119,7 @@ describe('Notification Routes', () => {
 
     it('should reject invalid input (empty array)', async () => {
       const res = await request(app)
-        .put('/api/notification/read-batch')
+        .put('/api/notifications/read-batch')
         .send({ ids: [] })
         .set('Authorization', `Bearer ${mockToken}`);
 
@@ -129,7 +129,7 @@ describe('Notification Routes', () => {
 
     it('should reject invalid input (non-UUID)', async () => {
       const res = await request(app)
-        .put('/api/notification/read-batch')
+        .put('/api/notifications/read-batch')
         .send({ ids: ['invalid-id'] })
         .set('Authorization', `Bearer ${mockToken}`);
 
@@ -138,13 +138,13 @@ describe('Notification Routes', () => {
     });
   });
 
-  describe('POST /api/notification/delete-batch', () => {
+  describe('POST /api/notifications/delete-batch', () => {
     it('should delete batch notifications with valid input', async () => {
-      (pool.query as any).mockResolvedValueOnce({});
-      const notificationIds = ['id1', 'id2', 'id3'];
+      (pool.query as any).mockResolvedValueOnce({ rows: [] });
+      const notificationIds = ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002'];
 
       const res = await request(app)
-        .post('/api/notification/delete-batch')
+        .post('/api/notifications/delete-batch')
         .send({ ids: notificationIds })
         .set('Authorization', `Bearer ${mockToken}`);
 
@@ -158,7 +158,7 @@ describe('Notification Routes', () => {
 
     it('should reject invalid input', async () => {
       const res = await request(app)
-        .post('/api/notification/delete-batch')
+        .post('/api/notifications/delete-batch')
         .send({ ids: [] })
         .set('Authorization', `Bearer ${mockToken}`);
 
@@ -167,7 +167,7 @@ describe('Notification Routes', () => {
     });
   });
 
-  describe('GET /api/notification', () => {
+  describe('GET /api/notifications', () => {
     it('should get notifications list with default parameters', async () => {
       (pool.query as any).mockResolvedValueOnce({
         rows: [
@@ -179,7 +179,7 @@ describe('Notification Routes', () => {
       });
 
       const res = await request(app)
-        .get('/api/notification')
+        .get('/api/notifications')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(200);
@@ -196,7 +196,7 @@ describe('Notification Routes', () => {
       (pool.query as any).mockResolvedValueOnce({ rows: [{ count: '0' }] });
 
       const res = await request(app)
-        .get('/api/notification?unread=true')
+        .get('/api/notifications?unread=true')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(200);
@@ -207,12 +207,12 @@ describe('Notification Routes', () => {
     });
   });
 
-  describe('PUT /api/notification/:id/read', () => {
+  describe('PUT /api/notifications/:id/read', () => {
     it('should mark single notification as read', async () => {
       (pool.query as any).mockResolvedValueOnce({});
 
       const res = await request(app)
-        .put('/api/notification/test-id/read')
+        .put('/api/notifications/test-id/read')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(200);
@@ -224,12 +224,12 @@ describe('Notification Routes', () => {
     });
   });
 
-  describe('DELETE /api/notification/:id', () => {
+  describe('DELETE /api/notifications/:id', () => {
     it('should delete single notification', async () => {
       (pool.query as any).mockResolvedValueOnce({});
 
       const res = await request(app)
-        .delete('/api/notification/test-id')
+        .delete('/api/notifications/test-id')
         .set('Authorization', `Bearer ${mockToken}`);
 
       expect(res.status).toBe(200);
