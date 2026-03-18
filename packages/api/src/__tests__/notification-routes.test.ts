@@ -1,5 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
+
+// Mock the auth middleware before importing app
+vi.mock('../middleware/auth.js', () => ({
+  authenticate: (req: any, res: any, next: any) => {
+    req.user = { userId: 'test-user-id', email: 'test@example.com', isAdmin: false };
+    next();
+  },
+  optionalAuth: (req: any, res: any, next: any) => {
+    // For routes that don't require auth, user might be undefined
+    next();
+  },
+  requireAdmin: (req: any, res: any, next: any) => {
+    // For admin routes, we'll mock as if user is admin for testing
+    req.user = { userId: 'test-admin-id', email: 'admin@example.com', isAdmin: true };
+    next();
+  },
+  generateToken: vi.fn().mockReturnValue('mock-jwt-token'),
+}));
+
 import { pool } from '../config/database.js';
 import app from '../app.js';
 
@@ -16,13 +35,6 @@ describe('Notification Routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock authentication middleware to always succeed
-    vi.mock('../middleware/auth.js', () => ({
-      authenticate: (req: any, res: any, next: any) => {
-        req.user = { userId: mockUserId };
-        next();
-      },
-    }));
   });
 
   afterEach(() => {

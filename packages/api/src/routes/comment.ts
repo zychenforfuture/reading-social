@@ -1,34 +1,12 @@
 import { Router, type Request, type Response } from 'express';
-import { z } from 'zod';
-import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { authenticate, optionalAuth, type AuthPayload } from '../middleware/auth.js';
-import { createNotification } from '../utils/notifications.js';
-import { cleanText } from '../utils/clean.js';
-
-/** 去掉所有空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化 */
-function normalizeSentence(text: string): string {
-  return text
-    .trim()
-    .replace(/\s+/g, '')           // 所有空白（含全角空格）
-    .replace(/[\u3000-\u303f\uff00-\uffef]/g, c => {
-      // 全角字母/数字转半角（range FF01-FF5E 对应 21-7E）
-      const cp = c.codePointAt(0)!;
-      return cp >= 0xff01 && cp <= 0xff5e ? String.fromCodePoint(cp - 0xfee0) : c;
-    })
-    // 去掉所有标点符号（中英文）
-    .replace(/[^\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af\w]/g, '');
-}
-
-/** MD5 of normalized sentence — used for cross-document comment sharing */
-function sentenceHash(text: string): string {
-  return createHash('md5').update(normalizeSentence(text)).digest('hex');
-}
+import { addSseClient, removeSseClient } from './comment.sse.js';
+import { commentCrudRoutes } from './comment.crud.js';
 
 const router: Router = Router();
 
-// ─── DB 迁移（首次启动自动执行）────────────────────────────────────
+// DB 迁移（首次启动自动执行）
 (async () => {
   try {
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS like_count INTEGER NOT NULL DEFAULT 0`);
@@ -40,12 +18,10 @@ const router: Router = Router();
         PRIMARY KEY (comment_id, user_id)
       )
     `);
-    // 二级回复结构迁移
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS root_id UUID REFERENCES comments(id) ON DELETE CASCADE`);
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL`);
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_count INTEGER NOT NULL DEFAULT 0`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_root_id ON comments(root_id)`);
-    // 修正存量 reply_count（重新按实际未删除回复数对齐，幂等）
     await pool.query(`
       UPDATE comments c
       SET reply_count = (
@@ -54,11 +30,9 @@ const router: Router = Router();
       )
       WHERE c.root_id IS NULL
     `);
-    // selected_text + sentence_hash（跨文档评论共享）
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS selected_text VARCHAR(500)`);
     await pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS sentence_hash VARCHAR(64)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_sentence_hash ON comments(sentence_hash)`);
-    // 回填已有评论的 sentence_hash（用归一化后的内容，覆盖之前未归一化的旧值）
     await pool.query(`
       UPDATE comments SET sentence_hash = md5(
         regexp_replace(
@@ -73,125 +47,11 @@ const router: Router = Router();
     logger.error('comment_likes migration failed:', err);
   }
 })();
-// ────────────────────────────────────────────────────────────────
-
-// ─── SSE 客户端注册表 ────────────────────────────────────────────
-// documentId → Set<Response>（存每个打开文档的长连接）
-const sseClients = new Map<string, Set<Response>>();
-// 跟踪每个连接的心跳定时器 + 连接时间，用于清理
-const sseHeartbeats = new WeakMap<Response, NodeJS.Timeout>();
-const sseConnectionTime = new WeakMap<Response, number>();
-// 每文档最大连接数上限
-const MAX_CONNECTIONS_PER_DOCUMENT = 100;
-// 连接最长存活时间（30 分钟）
-const MAX_CONNECTION_AGE_MS = 30 * 60 * 1000;
-// 空闲超时（10 分钟无心跳）
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
-// 心跳响应跟踪
-const sseLastHeartbeat = new WeakMap<Response, number>();
-
-function addSseClient(documentId: string, res: Response): boolean {
-  if (!sseClients.has(documentId)) sseClients.set(documentId, new Set());
-  const clients = sseClients.get(documentId)!;
-
-  // 连接数上限保护
-  if (clients.size >= MAX_CONNECTIONS_PER_DOCUMENT) {
-    return false;
-  }
-
-  clients.add(res);
-  sseConnectionTime.set(res, Date.now());
-  sseLastHeartbeat.set(res, Date.now());
-  return true;
-}
-
-function removeSseClient(documentId: string, res: Response): void {
-  const clients = sseClients.get(documentId);
-  if (clients) {
-    clients.delete(res);
-    if (clients.size === 0) sseClients.delete(documentId);
-  }
-}
-
-function broadcastToDocument(documentId: string, data: object): void {
-  const clients = sseClients.get(documentId);
-  if (!clients || clients.size === 0) return;
-  const payload = `data: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) {
-    try { res.write(payload); } catch { /* 客户端已断开 */ }
-  }
-}
-
-/**
- * 清理断开的 SSE 客户端（激进的清理策略）
- * 每 1 分钟运行一次，清理：
- * 1. writableEnded 的连接
- * 2. 超过最大存活时间的连接
- * 3. 超过空闲超时的连接
- */
-function cleanupTimeout(): void {
-  let cleanedCount = 0;
-  const now = Date.now();
-
-  for (const [documentId, clients] of sseClients.entries()) {
-    const toRemove: Response[] = [];
-    for (const res of clients) {
-      // 1. 已断开的连接
-      if (res.writableEnded) {
-        toRemove.push(res);
-        continue;
-      }
-
-      // 2. 超过最大存活时间
-      const connectTime = sseConnectionTime.get(res);
-      if (connectTime && now - connectTime > MAX_CONNECTION_AGE_MS) {
-        toRemove.push(res);
-        logger.info(`SSE forced disconnect: doc=${documentId.substring(0, 8)}… (max age exceeded)`);
-        continue;
-      }
-
-      // 3. 空闲超时（超过 10 分钟未收到心跳响应）
-      const lastHeartbeat = sseLastHeartbeat.get(res);
-      if (lastHeartbeat && now - lastHeartbeat > IDLE_TIMEOUT_MS) {
-        toRemove.push(res);
-        logger.info(`SSE idle timeout: doc=${documentId.substring(0, 8)}…`);
-        continue;
-      }
-    }
-
-    for (const res of toRemove) {
-      const heartbeat = sseHeartbeats.get(res);
-      if (heartbeat) clearInterval(heartbeat);
-      removeSseClient(documentId, res);
-      cleanedCount++;
-    }
-  }
-
-  if (cleanedCount > 0) {
-    logger.info(`SSE cleanup: removed ${cleanedCount} stale clients`);
-  }
-}
-
-// 启动全局定期清理（每 1 分钟）
-setInterval(() => cleanupTimeout(), 60 * 1000);
-logger.info('SSE cleanup scheduled every 1 minute');
-// ────────────────────────────────────────────────────────────────
-
-const commentSchema = z.object({
-  content: z.string().min(1).max(5000),
-  blockHash: z.string().length(64).optional(), // 根评论必填
-  rootId: z.string().uuid().optional(),         // 回复时必填
-  replyToUserId: z.string().uuid().optional(),  // @某人（可选）
-  selectedText: z.string().max(500).optional(),
-  // 小兴容旧字段
-  parentCommentId: z.string().uuid().optional(),
-});
 
 // SSE 推送：订阅文档的实时评论更新
 router.get('/stream/:documentId', (req: Request, res: Response) => {
   const documentId = String(req.params['documentId'] ?? '');
 
-  // 尝试添加客户端，检查是否超过连接数上限
   const added = addSseClient(documentId, res);
   if (!added) {
     res.status(503).json({ error: 'Too many connections to this document' });
@@ -201,530 +61,35 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // 关闭 nginx 缓冲，SSE 立即推送
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  // 初始心跳确认连接建立
   res.write(': connected\n\n');
 
-  logger.info(`SSE connected: doc=${documentId.substring(0, 8)}… clients=${sseClients.get(documentId)?.size}`);
+  logger.info(`SSE connected: doc=${documentId.substring(0, 8)}…`);
 
-  // 每 30s 发心跳，防止 nginx/负载均衡器因空闲超时断开连接
   const heartbeat = setInterval(() => {
     try {
       res.write(': ping\n\n');
-      // 记录心跳时间
-      sseLastHeartbeat.set(res, Date.now());
     } catch {
       clearInterval(heartbeat);
     }
   }, 30000);
-  sseHeartbeats.set(res, heartbeat);
 
-  // 清理函数：确保只清理一次
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
     clearInterval(heartbeat);
-    sseHeartbeats.delete(res);
     removeSseClient(documentId, res);
-    logger.info(`SSE disconnected: doc=${documentId.substring(0, 8)}… remaining=${sseClients.get(documentId)?.size ?? 0}`);
+    logger.info(`SSE disconnected: doc=${documentId.substring(0, 8)}…`);
   };
 
-  // 监听 socket 和 response 的关闭事件（双重保险）
   req.socket.on('close', cleanup);
   res.on('close', cleanup);
 });
 
-// 获取根评论下的所有回复（二级扁平）
-router.get('/:id/replies', optionalAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user?.userId || null;
-    const result = await pool.query(
-      `SELECT c.*, u.username, u.avatar_url,
-              ru.username as reply_to_username,
-              CASE WHEN cl.user_id IS NOT NULL THEN true ELSE false END as liked_by_me
-       FROM comments c
-       LEFT JOIN users u ON c.user_id = u.id
-       LEFT JOIN users ru ON ru.id = c.reply_to_user_id
-       LEFT JOIN comment_likes cl ON cl.comment_id = c.id AND cl.user_id = $2
-       WHERE c.root_id = $1 AND c.is_deleted = false
-       ORDER BY c.created_at ASC`,
-      [id, userId]
-    );
-    res.json({ replies: result.rows });
-  } catch (error) {
-    logger.error('Get replies error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// 获取某内容块的所有评论
-router.get('/block/:hash', optionalAuth, async (req, res) => {
-  try {
-    const { hash } = req.params;
-
-    const result = await pool.query(
-      `SELECT c.*, u.username, u.avatar_url
-       FROM comments c
-       LEFT JOIN users u ON c.user_id = u.id
-       WHERE c.block_hash = $1 AND c.is_deleted = false AND c.parent_comment_id IS NULL
-       ORDER BY c.created_at ASC`,
-      [hash]
-    );
-
-    // 获取回复
-    const comments = result.rows;
-    for (const comment of comments) {
-      const repliesResult = await pool.query(
-        `SELECT c.*, u.username, u.avatar_url
-         FROM comments c
-         LEFT JOIN users u ON c.user_id = u.id
-         WHERE c.parent_comment_id = $1 AND c.is_deleted = false
-         ORDER BY c.created_at ASC`,
-        [comment.id]
-      );
-      comment.replies = repliesResult.rows;
-    }
-
-    res.json({ comments });
-  } catch (error) {
-    logger.error('Get block comments error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// 创建评论（根评论或回复）
-router.post('/', authenticate, async (req: Request, res: Response) => {
-  try {
-    const parsedBody = commentSchema.parse(req.body);
-    const { blockHash, rootId, replyToUserId } = parsedBody;
-    let content = parsedBody.content;
-    let selectedText = parsedBody.selectedText;
-
-    // 清理输入以去除 null 字节和不可见控制字符，限制长度
-    content = cleanText(content, 5000);
-    if (typeof selectedText === 'string') selectedText = cleanText(selectedText, 500);
-
-    const { userId } = req.user!;
-
-    if (rootId) {
-      // ───── 回复模式 ─────
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-
-        // 从根评论继承 block_hash
-        const rootRow = await client.query(
-          'SELECT block_hash, user_id, content, selected_text FROM comments WHERE id = $1 AND root_id IS NULL AND is_deleted = false',
-          [rootId]
-        );
-        if (rootRow.rows.length === 0) {
-          await client.query('ROLLBACK');
-          return res.status(404).json({ error: 'Root comment not found' });
-        }
-        const inheritedBlockHash: string = rootRow.rows[0].block_hash;
-        const rootAuthorId: string | null = rootRow.rows[0].user_id ?? null;
-
-        const result = await client.query(
-          `INSERT INTO comments (block_hash, user_id, content, root_id, reply_to_user_id, selected_text)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, block_hash, user_id, content, root_id, reply_to_user_id, selected_text, created_at`,
-          [inheritedBlockHash, userId, content, rootId, replyToUserId || null, selectedText || null]
-        );
-
-        // 根评论 reply_count +1
-        await client.query('UPDATE comments SET reply_count = reply_count + 1 WHERE id = $1', [rootId]);
-        await client.query('COMMIT');
-
-        const reply = result.rows[0];
-        if (userId) {
-          const u = await pool.query('SELECT username, avatar_url FROM users WHERE id = $1', [userId]);
-          reply.username = u.rows[0]?.username ?? null;
-          reply.avatar_url = u.rows[0]?.avatar_url ?? null;
-        }
-        if (replyToUserId) {
-          const rtu = await pool.query('SELECT username FROM users WHERE id = $1', [replyToUserId]);
-          reply.reply_to_username = rtu.rows[0]?.username ?? null;
-        }
-
-        logger.info(`Reply created: ${reply.id} under root ${rootId.substring(0, 8)}...`);
-
-        // 跨文档广播
-        try {
-          const docRows = await pool.query(
-            'SELECT DISTINCT document_id FROM document_blocks WHERE block_hash = $1',
-            [inheritedBlockHash]
-          );
-          for (const row of docRows.rows) {
-            broadcastToDocument(row.document_id, { type: 'new_reply', rootId, reply });
-          }
-        } catch { /* 广播失败不影响响应 */ }
-
-        // 异步发送通知（非阻塞，失败不影响响应）
-        try {
-          const notifDocRow = await pool.query(
-            `SELECT d.id, d.title FROM documents d
-             JOIN document_blocks db ON db.document_id = d.id
-             WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`,
-            [inheritedBlockHash]
-          );
-          const nd = notifDocRow.rows[0];
-          const senderName: string = reply.username || '有人';
-          const notifData = {
-            commentId: reply.id,
-            documentId: nd?.id,
-            documentTitle: nd?.title,
-            blockHash: inheritedBlockHash,
-            originalContent: (rootRow.rows[0].content as string | undefined)?.slice(0, 150),
-            selectedText: (rootRow.rows[0].selected_text as string | undefined)?.slice(0, 200) || undefined,
-          };
-          if (rootAuthorId && rootAuthorId !== userId) {
-            await createNotification({
-              userId: rootAuthorId,
-              type: 'reply',
-              title: `${senderName} 回复了你的评论`,
-              content: content.slice(0, 100),
-              data: notifData,
-            });
-          }
-          if (replyToUserId && replyToUserId !== userId && replyToUserId !== rootAuthorId) {
-            await createNotification({
-              userId: replyToUserId,
-              type: 'mention',
-              title: `${senderName} 在评论中提到了你`,
-              content: content.slice(0, 100),
-              data: notifData,
-            });
-          }
-        } catch { /* 通知失败不影响响应 */ }
-
-        return res.status(201).json({ comment: reply });
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
-      }
-    }
-
-    // ───── 根评论模式 ─────
-    if (!blockHash) {
-      return res.status(400).json({ error: 'blockHash is required for root comments' });
-    }
-
-    const sHash = selectedText ? sentenceHash(selectedText) : null;
-    const result = await pool.query(
-      `INSERT INTO comments (block_hash, user_id, content, selected_text, sentence_hash)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, block_hash, user_id, content, selected_text, sentence_hash, reply_count, created_at`,
-      [blockHash, userId, content, selectedText || null, sHash]
-    );
-
-    const comment = result.rows[0];
-    if (userId) {
-      const userResult = await pool.query('SELECT username, avatar_url FROM users WHERE id = $1', [userId]);
-      comment.username = userResult.rows[0]?.username ?? null;
-      comment.avatar_url = userResult.rows[0]?.avatar_url ?? null;
-    }
-
-    logger.info(`Comment created: ${comment.id} on block ${blockHash.substring(0, 8)}...`);
-
-    // 广播到所有包含该 block 的文档（包含去重引用文档）
-    try {
-      const docRows = await pool.query(
-        `SELECT DISTINCT d.id AS document_id
-         FROM document_blocks db
-         JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
-         WHERE db.block_hash = $1`,
-        [blockHash]
-      );
-      for (const row of docRows.rows) {
-        broadcastToDocument(row.document_id, { type: 'new_comment', comment });
-      }
-    } catch { /* 广播失败不影响正常响应 */ }
-
-    res.status(201).json({ comment });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation failed', details: error.errors });
-    }
-    logger.error('Create comment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// 更新评论
-router.patch('/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const parsed = z.object({
-      content: z.string().min(1).max(5000).optional(),
-      isResolved: z.boolean().optional(),
-    }).parse(req.body);
-    const { isResolved } = parsed;
-    let { content } = parsed;
-    if (content !== undefined) content = cleanText(content, 5000);
-
-    const { userId, isAdmin } = req.user!;
-
-    // 检查评论归属或管理员权限
-    const commentResult = await pool.query('SELECT user_id FROM comments WHERE id = $1 AND is_deleted = false', [id]);
-    if (commentResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Comment not found' });
-    }
-
-    if (!isAdmin && commentResult.rows[0].user_id !== userId) {
-      return res.status(403).json({ error: 'Cannot update other users\' comments' });
-    }
-
-    const updates: string[] = [];
-    const values: unknown[] = [];
-    let paramIndex = 1;
-
-    if (content !== undefined) {
-      updates.push(`content = $${paramIndex++}`);
-      values.push(content);
-    }
-    if (isResolved !== undefined) {
-      updates.push(`is_resolved = $${paramIndex++}`);
-      values.push(isResolved);
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'No updates provided' });
-    }
-
-    updates.push(`updated_at = NOW()`);
-    values.push(id);
-
-    const result = await pool.query(
-      `UPDATE comments SET ${updates.join(', ')} WHERE id = $${paramIndex}
-       RETURNING id, content, is_resolved, updated_at`,
-      values
-    );
-
-    res.json({ comment: result.rows[0] });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation failed', details: error.errors });
-    }
-    logger.error('Update comment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// 删除评论 (软删除) — 只能删自己的，管理员可删所有
-router.delete('/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { userId, isAdmin } = req.user!;
-
-    // 查评论归属
-    const commentRow = await pool.query('SELECT user_id, root_id FROM comments WHERE id = $1 AND is_deleted = false', [id]);
-
-    if (commentRow.rows.length === 0) {
-      return res.status(404).json({ error: 'Comment not found' });
-    }
-
-    const commentOwnerId = commentRow.rows[0].user_id;
-    const rootId: string | null = commentRow.rows[0].root_id;
-
-    if (!isAdmin && commentOwnerId !== userId) {
-      return res.status(403).json({ error: 'Cannot delete other users\' comments' });
-    }
-
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        "UPDATE comments SET is_deleted = true, content = '[Deleted]' WHERE id = $1",
-        [id]
-      );
-      // 如果是回复，根评论 reply_count -1
-      if (rootId) {
-        await client.query(
-          'UPDATE comments SET reply_count = GREATEST(0, reply_count - 1) WHERE id = $1',
-          [rootId]
-        );
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    logger.info(`Comment soft deleted: ${id} by user ${userId}`);
-    res.json({ message: 'Comment deleted' });
-  } catch (error) {
-    logger.error('Delete comment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// 点赞 / 取消点赞（toggle）
-// 借鉴起点读书方案：Redis 原子计数 + 异步持久化
-router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const userId = (req.user as AuthPayload).userId;
-
-    // 查评论（需要 block_hash 用于广播）
-    const commentRow = await pool.query(
-      'SELECT block_hash, user_id, content FROM comments WHERE id = $1 AND is_deleted = false',
-      [id]
-    );
-    if (commentRow.rows.length === 0) {
-      return res.status(404).json({ error: 'Comment not found' });
-    }
-    const blockHash: string = commentRow.rows[0].block_hash;
-    const authorId: string | null = commentRow.rows[0].user_id ?? null;
-    const content: string = commentRow.rows[0].content;
-
-    // 优先使用 Redis 原子操作（高并发场景）
-    const { isRedisAvailable, atomicToggleLike } = await import('../utils/likeCounter.js');
-    if (await isRedisAvailable()) {
-      const result = await atomicToggleLike(String(id), String(userId));
-
-      // 异步广播和通知（不阻塞响应）
-      Promise.resolve().then(async () => {
-        try {
-          const docRows = await pool.query(
-            `SELECT DISTINCT d.id AS document_id
-             FROM document_blocks db
-             JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
-             WHERE db.block_hash = $1`,
-            [blockHash]
-          );
-          for (const row of docRows.rows) {
-            broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount: result.likeCount });
-          }
-        } catch { /* 广播失败不影响响应 */ }
-
-        // 点赞时通知作者
-        if (result.liked && authorId && authorId !== userId) {
-          try {
-            const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
-            const senderName = senderRow.rows[0]?.username || '有人';
-            const nd = await pool.query(
-              `SELECT d.id, d.title FROM documents d
-               JOIN document_blocks db ON db.document_id = d.id
-               WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`
-            ).then(r => r.rows[0]);
-            await createNotification({
-              userId: authorId,
-              type: 'like',
-              title: `${senderName} 点赞了你的评论`,
-              content: content?.slice(0, 100),
-              data: {
-                commentId: id,
-                documentId: nd?.id,
-                documentTitle: nd?.title,
-                blockHash,
-                originalContent: content?.slice(0, 150),
-              },
-            });
-          } catch { /* 通知失败不影响响应 */ }
-        }
-      }).catch(err => logger.warn('Async like notification failed:', err));
-
-      return res.json(result);
-    }
-
-    // Redis 不可用时降级到数据库（兜底方案）
-    // 使用 ON CONFLICT + FOR UPDATE 防止并发冲突
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // 锁住评论行，防止并发修改
-      await client.query('SELECT 1 FROM comments WHERE id = $1 FOR UPDATE', [id]);
-
-      const existing = await client.query(
-        'SELECT 1 FROM comment_likes WHERE comment_id = $1 AND user_id = $2',
-        [id, userId]
-      );
-
-      let liked: boolean;
-      let likeCount: number;
-
-      if (existing.rows.length > 0) {
-        await client.query('DELETE FROM comment_likes WHERE comment_id = $1 AND user_id = $2', [id, userId]);
-        const updated = await client.query(
-          'UPDATE comments SET like_count = GREATEST(0, like_count - 1) WHERE id = $1 RETURNING like_count',
-          [id]
-        );
-        liked = false;
-        likeCount = updated.rows[0].like_count;
-      } else {
-        // 使用 ON CONFLICT DO NOTHING 防止主键冲突
-        await client.query(
-          `INSERT INTO comment_likes (comment_id, user_id) VALUES ($1, $2)
-           ON CONFLICT (comment_id, user_id) DO NOTHING`,
-          [id, userId]
-        );
-        const updated = await client.query(
-          'UPDATE comments SET like_count = like_count + 1 WHERE id = $1 RETURNING like_count',
-          [id]
-        );
-        liked = true;
-        likeCount = updated.rows[0].like_count;
-      }
-
-      await client.query('COMMIT');
-
-      // 广播
-      const docRows = await pool.query(
-        `SELECT DISTINCT d.id AS document_id
-         FROM document_blocks db
-         JOIN documents d ON (d.id = db.document_id OR d.canonical_document_id = db.document_id)
-         WHERE db.block_hash = $1`,
-        [blockHash]
-      );
-      for (const row of docRows.rows) {
-        broadcastToDocument(row.document_id, { type: 'like_updated', commentId: id, likeCount });
-      }
-
-      // 通知作者
-      if (liked && authorId && authorId !== userId) {
-        const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
-        const senderName = senderRow.rows[0]?.username || '有人';
-        const nd = await pool.query(
-          `SELECT d.id, d.title FROM documents d
-           JOIN document_blocks db ON db.document_id = d.id
-           WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`
-        ).then(r => r.rows[0]);
-        await createNotification({
-          userId: authorId,
-          type: 'like',
-          title: `${senderName} 点赞了你的评论`,
-          content: content?.slice(0, 100),
-          data: {
-            commentId: id,
-            documentId: nd?.id,
-            documentTitle: nd?.title,
-            blockHash,
-            originalContent: content?.slice(0, 150),
-          },
-        });
-      }
-
-      res.json({ liked, likeCount });
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (error) {
-    logger.error('Like comment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+// 挂载 CRUD 路由
+router.use('/', commentCrudRoutes);
 
 export { router as commentRoutes };
