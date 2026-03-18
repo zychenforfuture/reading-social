@@ -39,7 +39,8 @@
 
 ```bash
 pnpm install
-pnpm run dev:all
+./scripts/dev.sh up   # 混合模式启动（推荐）
+# 或 pnpm run dev:all  # 直接使用 workspace 脚本
 ```
 
 ### 运行测试

@@ -80,6 +80,7 @@ reading/
 
 ```bash
 pnpm install
+./scripts/dev.sh up
 pnpm run dev:all
 ```
 

@@ -38,7 +38,8 @@ cp .env.example .env
 
 ```bash
 pnpm install
-pnpm run dev:all
+./scripts/dev.sh up   # 混合模式启动（推荐，按 Ctrl+C 结束本地进程）
+# 或 pnpm run dev:all  # 直接调用 workspace 脚本
 ```
 
 说明：`dev:all` 采用混合模式，会启动 postgres、redis、qdrant（容器），并在本机拉起 API、Worker、Web。
@@ -75,6 +76,15 @@ docker compose up -d postgres redis qdrant
 pnpm --filter @collab/api dev
 pnpm --filter @collab/worker dev
 pnpm --filter @collab/web dev
+```
+
+### 3.1 快捷命令
+
+```bash
+./scripts/dev.sh infra   # 仅启动基础设施
+./scripts/dev.sh logs    # 查看 postgres/redis/qdrant 日志
+./scripts/dev.sh status  # 查看容器状态
+./scripts/dev.sh down    # 停止基础设施
 ```
 
 ## 4. 健康检查
