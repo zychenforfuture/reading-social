@@ -33,12 +33,15 @@ export function removeSseClient(documentId: string, res: Response): void {
   }
 }
 
-export function broadcastToDocument(documentId: string, data: object): void {
-  const clients = sseClients.get(documentId);
-  if (!clients || clients.size === 0) return;
-  const payload = `data: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) {
-    try { res.write(payload); } catch {}
+export function broadcastToDocument(documentId: string | string[], data: object): void {
+  const docIds = Array.isArray(documentId) ? documentId : [documentId];
+  for (const docId of docIds) {
+    const clients = sseClients.get(docId);
+    if (!clients || clients.size === 0) continue;
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    for (const res of clients) {
+      try { res.write(payload); } catch {}
+    }
   }
 }
 

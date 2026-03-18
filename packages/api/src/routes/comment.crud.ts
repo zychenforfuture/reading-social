@@ -134,7 +134,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
             [inheritedBlockHash]
           );
           for (const row of docRows.rows) {
-            broadcastToDocument(row.document_id, { type: 'new_reply', rootId, reply });
+            broadcastToDocument(row.document_id as string | string[], { type: 'new_reply', rootId, reply });
           }
         } catch {}
 
@@ -186,7 +186,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
         [blockHash]
       );
       for (const row of docRows.rows) {
-        broadcastToDocument(String(row.document_id), { type: 'new_comment', comment });
+        broadcastToDocument(row.document_id, { type: 'new_comment', comment });
       }
     } catch {}
 
@@ -320,7 +320,7 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
     if (commentRow.rows.length === 0) {
       return res.status(404).json({ error: 'Comment not found' });
     }
-    const blockHash: string = String(commentRow.rows[0].block_hash);
+    const blockHash: string = commentRow.rows[0].block_hash as string;
     const authorId: string | null = commentRow.rows[0].user_id ?? null;
     const content: string = commentRow.rows[0].content;
 
@@ -338,7 +338,7 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
             [blockHash]
           );
           for (const row of docRows.rows) {
-            broadcastToDocument(String(row.document_id), { type: 'like_updated', commentId: id, likeCount: result.likeCount });
+            broadcastToDocument(row.document_id as string, { type: 'like_updated', commentId: id, likeCount: result.likeCount });
           }
         } catch {}
 
@@ -396,11 +396,11 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
         [blockHash]
       );
       for (const row of docRows.rows) {
-        broadcastToDocument(String(row.document_id as string), { type: 'like_updated', commentId: id, likeCount });
+        broadcastToDocument(row.document_id as string, { type: 'like_updated', commentId: id, likeCount });
       }
 
       if (liked && authorId && authorId !== userId) {
-        await sendLikeNotification({ userId, authorId, content, commentId: id, blockHash: blockHash as string | string[] });
+        await sendLikeNotification({ userId, authorId, content, commentId: id, blockHash });
       }
 
       res.json({ liked, likeCount });

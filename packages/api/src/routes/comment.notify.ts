@@ -16,7 +16,7 @@ interface LikeNotificationData {
   authorId: string;
   content: string | undefined;
   commentId: string;
-  blockHash: string;
+  blockHash: string | string[];
 }
 
 export async function sendCommentNotifications(data: CommentNotificationData): Promise<void> {
