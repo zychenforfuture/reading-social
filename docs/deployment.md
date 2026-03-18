@@ -26,6 +26,8 @@ cp .env.production.example .env.production
 - ADMIN_EMAILS
 - SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM
 
+> 提示：部署脚本不会再自动生成 `.env.production`，请先按需复制和填写。若使用自定义路径，可通过 `ENV_FILE=/path/to/env ./scripts/deploy.sh up` 指定。
+
 ## 2. 推荐部署方式（脚本）
 
 ```bash
@@ -42,6 +44,8 @@ cp .env.production.example .env.production
 ./scripts/deploy.sh down
 ./scripts/deploy.sh db-backup
 ```
+
+默认读取 `.env.production`，也可通过 `ENV_FILE` 指定其他环境文件。
 
 ## 3. 直接 compose 部署
 

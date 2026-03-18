@@ -1,8 +1,24 @@
 # 脚本说明
 
-本目录当前保留两个脚本：`test.sh` 和 `deploy.sh`。
+本目录包含本地开发、测试与部署的自动化脚本。
 
-## test.sh
+## dev.sh（混合开发）
+
+用途：一键启动/关闭混合模式（Docker 基础设施 + 本地 API/Worker/Web）。
+
+常用命令：
+
+```bash
+./scripts/dev.sh up        # 启动基础设施 + 本地进程，按 Ctrl+C 结束本地进程
+./scripts/dev.sh infra     # 仅启动基础设施容器
+./scripts/dev.sh down      # 停止基础设施容器
+./scripts/dev.sh logs      # 查看基础设施日志
+./scripts/dev.sh status    # 查看基础设施状态
+```
+
+可选：通过 `ENV_FILE` 覆盖环境文件（默认 `.env`）。
+
+## test.sh（本地测试）
 
 用途：本地一键测试入口。
 
@@ -26,32 +42,25 @@ pnpm test
 ./scripts/test.sh auth.test.ts
 ```
 
-## deploy.sh
+## deploy.sh（全 Docker 部署）
 
-用途：生产部署入口。
+用途：生产部署入口，依赖 `.env.production`（可用 ENV_FILE 指定）。
 
 常用命令：
 
 ```bash
-# 启动服务
-./scripts/deploy.sh up
-
-# 查看状态和日志
-./scripts/deploy.sh status
-./scripts/deploy.sh logs
-
-# 重启或重建
-./scripts/deploy.sh restart
-./scripts/deploy.sh rebuild
-
-# 停止与备份
-./scripts/deploy.sh down
-./scripts/deploy.sh db-backup
+./scripts/deploy.sh up       # 构建并启动
+./scripts/deploy.sh status   # 查看状态
+./scripts/deploy.sh logs     # 跟随日志
+./scripts/deploy.sh restart  # 重启
+./scripts/deploy.sh rebuild  # 强制重建镜像
+./scripts/deploy.sh down     # 停止容器
+./scripts/deploy.sh db-backup # 生成数据库备份
 ```
 
 说明：
-- 开发模式采用混合模式：Docker 跑基础设施，本地运行 API/Worker/Web（`pnpm run dev:all`）。
-- 部署模式采用全 Docker 模式：统一使用 `scripts/deploy.sh`。
+- 开发模式：Docker 跑基础设施，本地运行 API/Worker/Web（可用 `scripts/dev.sh up`）。
+- 部署模式：全 Docker 模式，使用 `scripts/deploy.sh`。
 
 ## 相关文档
 

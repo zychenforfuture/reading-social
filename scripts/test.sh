@@ -3,7 +3,7 @@
 # 本地测试脚本
 # 自动启动测试服务 → 运行测试 → 清理服务
 
-set -e
+set -euo pipefail
 
 echo "========================================"
 echo "  共鸣阅读 - 本地测试"
@@ -20,11 +20,33 @@ NC='\033[0m' # No Color
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+COMPOSE_FILE="docker-compose.test.yml"
+
+if command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_CMD="docker-compose"
+elif docker compose version >/dev/null 2>&1; then
+  COMPOSE_CMD="docker compose"
+else
+  echo -e "${RED}✗ 未检测到 Docker Compose，请安装 Docker Desktop 或 docker-compose 插件。${NC}"
+  exit 1
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo -e "${RED}✗ 未检测到 Docker，请先安装并启动 Docker Desktop / Docker Engine。${NC}"
+  echo -e "   参考：https://docs.docker.com/get-docker/"
+  exit 1
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo -e "${RED}✗ 未检测到 pnpm，请先执行 corepack enable 或安装 pnpm。${NC}"
+  exit 1
+fi
+
 # 清理函数
 cleanup() {
   echo ""
   echo -e "${YELLOW}正在清理测试环境...${NC}"
-  docker compose -f docker-compose.test.yml down > /dev/null 2>&1
+  $COMPOSE_CMD -f "$COMPOSE_FILE" down --remove-orphans >/dev/null 2>&1 || true
   echo -e "${GREEN}✓ 清理完成${NC}"
 }
 
@@ -33,20 +55,14 @@ trap cleanup EXIT
 
 # 步骤 1: 启动测试服务
 echo -e "${YELLOW}[1/4] 启动测试服务 (PostgreSQL + Redis + Qdrant)...${NC}"
-# 检查是否安装并能访问 Docker
-if ! command -v docker >/dev/null 2>&1; then
-  echo -e "${RED}✗ 未检测到 Docker，请先安装并启动 Docker Desktop / Docker Engine。"
-  echo -e "   参考：https://docs.docker.com/get-docker/"
-  exit 1
-fi
 
 if ! docker info >/dev/null 2>&1; then
-  echo -e "${RED}✗ Docker 无法访问（daemon 未启动或无权限）。请确保 Docker 已启动并且当前用户有权限运行 docker。" 
+  echo -e "${RED}✗ Docker 无法访问（daemon 未启动或无权限）。请确保 Docker 已启动并且当前用户有权限运行 docker。${NC}"
   exit 1
 fi
 
-docker compose -f docker-compose.test.yml up -d > /dev/null 2>&1 || {
-  echo -e "${RED}✗ 启动 docker compose 服务失败，请查看 docker-compose.test.yml 配置并手动运行。";
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d >/dev/null 2>&1 || {
+  echo -e "${RED}✗ 启动 docker compose 服务失败，请查看 docker-compose.test.yml 配置并手动运行。${NC}";
   exit 1;
 }
 
@@ -55,7 +71,7 @@ echo -e "${YELLOW}      等待服务启动...${NC}"
 sleep 10
 
 # 检查服务状态
-if ! docker compose -f docker-compose.test.yml ps | grep -q "healthy\|Up"; then
+if ! $COMPOSE_CMD -f "$COMPOSE_FILE" ps | grep -q "healthy\|Up"; then
   echo -e "${RED}✗ 服务启动失败${NC}"
   exit 1
 fi
@@ -66,11 +82,11 @@ echo ""
 echo -e "${YELLOW}[2/4] 初始化测试数据库...${NC}"
 docker exec collab-postgres-test psql -U admin -d collab_comments_test -c "
 CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";
-" > /dev/null 2>&1
+" >/dev/null 2>&1
 
 # 读取并执行项目初始化 SQL
 if [ -f "docker/postgres/init.sql" ]; then
-  docker exec -i collab-postgres-test psql -U admin -d collab_comments_test < docker/postgres/init.sql > /dev/null 2>&1
+  docker exec -i collab-postgres-test psql -U admin -d collab_comments_test < docker/postgres/init.sql >/dev/null 2>&1
 fi
 echo -e "${GREEN}✓ 数据库表已创建${NC}"
 echo ""
@@ -93,7 +109,7 @@ echo -e "${YELLOW}[4/4] 运行测试...${NC}"
 echo ""
 
 # 检查是否指定了特定测试文件
-if [ -n "$1" ]; then
+if [ -n "${1:-}" ]; then
   echo -e "${YELLOW}      运行指定测试：$1${NC}"
   pnpm --filter @collab/api test -- "$1"
 else
