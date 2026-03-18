@@ -98,7 +98,6 @@ export default function DocumentPage() {
 
     loadAll().catch(() => { if (!cancelled) setLoadingBlocks(false); });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // data shim 供下方代码复用
@@ -210,7 +209,10 @@ export default function DocumentPage() {
     };
   }, [id, queryClient]);
 
-  const blockCommentCount = commentsData?.blockCommentCount ?? {};
+  const blockCommentCount = useMemo(
+    () => commentsData?.blockCommentCount ?? {},
+    [commentsData?.blockCommentCount]
+  );
 
   const chapters = useMemo(
     () => buildChapters(allBlocks, blockCommentCount),
@@ -241,7 +243,7 @@ export default function DocumentPage() {
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allBlocks.length, chapters.length]);
+  }, [allBlocks.length, chapters.length, id]);
 
   // 章节列表首次建立（或文档切换后重建）时，恢复上次阅读位置
   useEffect(() => {
@@ -262,7 +264,7 @@ export default function DocumentPage() {
         requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: y })));
       }
     } catch {}
-  }, [chapters.length]);
+  }, [chapters.length, id]);
 
   const chapter = chapters[currentChapter];
   const chapterBlocks = chapter

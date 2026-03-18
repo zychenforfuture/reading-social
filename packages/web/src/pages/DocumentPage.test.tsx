@@ -5,6 +5,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
+import * as utilsModule from '../lib/utils.js';
+import * as readingSettingsModule from '../components/document/ReadingSettings.js';
 
 // Mock all required modules at the top level
 vi.mock('react-router-dom', () => ({
@@ -89,7 +91,7 @@ describe('DocumentPage - 核心功能', () => {
     
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    expect(require('../lib/utils').api.getDocument).toHaveBeenCalledWith('test-doc-id', 0, 5000);
+    expect(utilsModule.api.getDocument).toHaveBeenCalledWith('test-doc-id', 0, 5000);
   });
 
   it('应该渲染APP标题', () => {
@@ -102,7 +104,7 @@ describe('DocumentPage - 核心功能', () => {
   it('应该初始化阅读设置', () => {
     render(<DocumentPage />);
     
-    expect(require('../components/document/ReadingSettings').loadSettings).toHaveBeenCalled();
+    expect(readingSettingsModule.loadSettings).toHaveBeenCalled();
   });
 });
 
