@@ -24,6 +24,8 @@
 | 测试文档 | 测试执行说明 | [docs/testing.md](./docs/testing.md) |
 | 部署文档 | 生产部署指南 | [docs/deployment.md](./docs/deployment.md) |
 | 脚本说明 | 自动化脚本使用 | [scripts/README.md](./scripts/README.md) |
+| 贡献指南 | 提交流程与校验项 | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| 变更记录 | 版本与重要改动 | [CHANGELOG.md](./CHANGELOG.md) |
 
 ## 当前能力边界
 
@@ -192,4 +194,4 @@ UPDATE users SET is_admin = true WHERE email = 'admin@example.com';
 
 ## 许可证
 
-MIT
+MIT（详见 [LICENSE](./LICENSE)）

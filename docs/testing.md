@@ -51,7 +51,7 @@ docker compose -f docker-compose.test.yml down
 
 ## 3. 当前测试文件
 
-### API 测试文件（10 个）
+### API 测试文件（11 个）
 
 - auth.test.ts
 - auth-integration.test.ts
@@ -63,6 +63,7 @@ docker compose -f docker-compose.test.yml down
 - middleware.test.ts
 - types.test.ts
 - performance.test.ts（性能基准测试）
+- jwt-secret.test.ts
 
 ### Web 测试文件（3 个）
 
