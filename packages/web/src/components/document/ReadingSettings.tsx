@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { cn } from '../../lib/utils';
 
 // ─── 阅读设置 ───────────────────────────────────────────────

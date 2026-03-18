@@ -54,7 +54,7 @@ pool.on('error', (err) => {
   // 在生产环境中仍建议监控并重启服务。
 });
 
-export async function query<T>(text: string, params?: unknown[]) {
+export async function query<T extends Record<string, unknown>>(text: string, params?: unknown[]) {
   const client = await pool.connect();
   try {
     const result = await client.query<T>(text, params);

@@ -16,8 +16,8 @@ interface DocumentHeaderProps {
 export default function DocumentHeader({
   title,
   chapters,
-  currentChapter,
-  loadingBlocks,
+  currentChapter: _currentChapter,
+  loadingBlocks: _loadingBlocks,
   chapterCommentCount,
   showSettings,
   onShowTOC,

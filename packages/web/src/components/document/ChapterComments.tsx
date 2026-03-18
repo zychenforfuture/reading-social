@@ -1,6 +1,5 @@
 import { useQueryClient, useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
-import { api, type ContentBlock, type Comment, cn, timeAgo } from '../../lib/utils';
+import { api, type ContentBlock, type Comment, timeAgo } from '../../lib/utils';
 import { useUserStore } from '../../stores/userStore';
 import { Avatar, ReplySection } from '../CommentPanel';
 import { MessageSquare } from 'lucide-react';

@@ -41,7 +41,7 @@ app.use(compression());
 app.use(cookieParser());
 
 // 健康检查端点
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -61,12 +61,12 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 处理
-app.use((req: Request, res: Response) => {
+app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
 });
 
 // 全局错误处理
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   logger.error('Global error handler:', err);
 
   res.status(err instanceof Error && 'status' in err ? (err as any).status : 500).json({
