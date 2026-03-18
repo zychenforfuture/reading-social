@@ -40,7 +40,9 @@ export function broadcastToDocument(documentId: string | string[], data: object)
     if (!clients || clients.size === 0) continue;
     const payload = `data: ${JSON.stringify(data)}\n\n`;
     for (const res of clients) {
-      try { res.write(payload); } catch {}
+      try { res.write(payload); } catch {
+        // 客户端已断开，静默忽略
+      }
     }
   }
 }

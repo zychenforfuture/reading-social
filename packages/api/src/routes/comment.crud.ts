@@ -136,7 +136,9 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
           for (const row of docRows.rows) {
             broadcastToDocument(row.document_id as string | string[], { type: 'new_reply', rootId, reply });
           }
-        } catch {}
+        } catch {
+          // SSE 广播失败不影响主流程，静默忽略
+        }
 
         // 发送通知
         await sendCommentNotifications({
@@ -188,7 +190,9 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       for (const row of docRows.rows) {
         broadcastToDocument(row.document_id, { type: 'new_comment', comment });
       }
-    } catch {}
+    } catch {
+      // SSE 广播失败不影响主流程，静默忽略
+    }
 
     res.status(201).json({ comment });
   } catch (error) {
@@ -340,7 +344,9 @@ router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
           for (const row of docRows.rows) {
             broadcastToDocument(row.document_id as string, { type: 'like_updated', commentId: id, likeCount: result.likeCount });
           }
-        } catch {}
+        } catch {
+          // SSE 广播失败不影响主流程，静默忽略
+        }
 
         if (result.liked && authorId && authorId !== userId) {
           await sendLikeNotification({ userId, authorId, content, commentId: id, blockHash });
