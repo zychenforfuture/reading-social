@@ -123,7 +123,7 @@
 | 格式 | 支持状态 | 说明 |
 |-----|---------|------|
 | `.txt` | ✅ 已支持 | 纯文本文件，推荐 UTF-8 编码 |
-| `.pdf` | ⏳ 开发中 | 预计下个版本支持 |
+| `.pdf` | ✅ 已支持 | 自动提取文字内容后上传 |
 | `.epub` | ⏳ 开发中 | 预计下个版本支持 |
 | `.doc/.docx` | ❌ 暂不支持 | 建议先转换为 txt |
 | `.md` | ❌ 暂不支持 | 建议先转换为 txt |
@@ -242,9 +242,9 @@
 
 **A**：可以通过以下方式反馈：
 
-- **GitHub Issues**：[提交 Issue](https://github.com/yourusername/resonant-reading/issues)
+- **GitHub Issues**：[提交 Issue](https://github.com/zychenforfuture/reading-social/issues)
 - **邮件反馈**：feedback@resonant.reading
-- **社群讨论**：加入我们的 Discord/微信群
+- **社群讨论**：社区渠道筹备中，当前请通过 Issue/邮件反馈
 
 我们会尽快回复并解决问题。
 
@@ -269,8 +269,8 @@
 如果以上 FAQ 没有解决你的问题，欢迎：
 
 - 📧 发送邮件至：support@resonant.reading
-- 💬 加入社群：[Discord 链接] / [微信群二维码]
-- 🐛 提交 Issue：[GitHub Issues](https://github.com/yourusername/resonant-reading/issues)
+- 💬 社群：线上社区筹备中，当前请通过 Issue/邮件交流
+- 🐛 提交 Issue：[GitHub Issues](https://github.com/zychenforfuture/reading-social/issues)
 
 我们会尽快回复！
 
