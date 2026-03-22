@@ -33,6 +33,14 @@ export function removeSseClient(documentId: string, res: Response): void {
   }
 }
 
+export function registerSseHeartbeat(res: Response, interval: NodeJS.Timeout): void {
+  sseHeartbeats.set(res, interval);
+}
+
+export function updateSseLastHeartbeat(res: Response): void {
+  sseLastHeartbeat.set(res, Date.now());
+}
+
 export function broadcastToDocument(documentId: string | string[], data: object): void {
   const docIds = Array.isArray(documentId) ? documentId : [documentId];
   for (const docId of docIds) {
