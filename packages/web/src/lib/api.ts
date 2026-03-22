@@ -235,8 +235,9 @@ export const api: {
     api.request<{ message: string }>(`/admin/comments/${id}`, { method: 'DELETE' }),
 };
 
+const likePending = new Map<string, { count: number; timer?: NodeJS.Timeout }>();
+
 export function likeCommentWithDebounce(commentId: string): Promise<{ liked: boolean; likeCount: number }> {
-  const likePending = new Map<string, { count: number; timer?: NodeJS.Timeout }>();
   const current = likePending.get(commentId) || { count: 0 };
   current.count += 1;
   likePending.set(commentId, current);

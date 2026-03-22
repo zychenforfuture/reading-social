@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { addSseClient, removeSseClient } from './comment.sse.js';
+import { addSseClient, removeSseClient, registerSseHeartbeat, updateSseLastHeartbeat } from './comment.sse.js';
 import { commentCrudRoutes } from './comment.crud.js';
 
 const router: Router = Router();
@@ -71,10 +71,13 @@ router.get('/stream/:documentId', (req: Request, res: Response) => {
   const heartbeat = setInterval(() => {
     try {
       res.write(': ping\n\n');
+      updateSseLastHeartbeat(res);
     } catch {
       clearInterval(heartbeat);
     }
   }, 30000);
+
+  registerSseHeartbeat(res, heartbeat);
 
   let cleaned = false;
   const cleanup = () => {
