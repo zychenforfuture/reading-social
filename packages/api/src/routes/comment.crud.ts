@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
 import { authenticate, optionalAuth, type AuthPayload } from '../middleware/auth.js';
@@ -17,6 +18,22 @@ const commentSchema = z.object({
   selectedText: z.string().max(500).optional(),
   parentCommentId: z.string().uuid().optional(),
 });
+
+// 去掉空白和中英文标点，保留纯文字内容，用于 sentence_hash 归一化
+function normalizeSentence(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[\u3000-\u303f\uff00-\uffef]/g, c => {
+      const cp = c.codePointAt(0)!;
+      return cp >= 0xff01 && cp <= 0xff5e ? String.fromCodePoint(cp - 0xfee0) : c;
+    })
+    .replace(/[^\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af\w]/g, '');
+}
+
+function sentenceHash(text: string): string {
+  return createHash('md5').update(normalizeSentence(text)).digest('hex');
+}
 
 // 获取根评论下的所有回复（二级扁平）
 router.get('/:id/replies', optionalAuth, async (_req: Request, res: Response) => {
@@ -163,11 +180,14 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'blockHash is required for root comments' });
     }
 
+    const sourceText = selectedText ?? content;
+    const normalized = normalizeSentence(sourceText);
+    const sHash = normalized ? sentenceHash(sourceText) : null;
     const result = await pool.query(
       `INSERT INTO comments (block_hash, user_id, content, selected_text, sentence_hash)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, block_hash, user_id, content, selected_text, sentence_hash, reply_count, created_at`,
-      [blockHash, userId, content, selectedText || null, selectedText ? null : null]
+      [blockHash, userId, content, selectedText || null, sHash]
     );
 
     const comment = result.rows[0];
