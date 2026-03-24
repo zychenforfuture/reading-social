@@ -10,23 +10,27 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 
-# 复制 package.json
-COPY package.json ./
+# 复制 workspace 清单
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/web/package.json ./packages/web/package.json
 
 # 安装所有依赖（包括 devDependencies）
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 
 # 复制源代码
-COPY . .
+COPY packages/types ./packages/types
+COPY packages/web ./packages/web
 
 # 构建
-RUN pnpm build
+RUN pnpm --filter @collab/types build
+RUN pnpm --filter @collab/web build
 
 # 生产阶段
 FROM nginx:alpine
 
 # 复制构建好的静态文件
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/packages/web/dist /usr/share/nginx/html
 
 # 暴露端口
 EXPOSE 80

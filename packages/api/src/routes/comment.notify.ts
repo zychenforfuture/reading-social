@@ -69,12 +69,14 @@ export async function sendLikeNotification(data: LikeNotificationData): Promise<
   const { userId, authorId, content, commentId, blockHash } = data;
 
   try {
+    const normalizedBlockHash = Array.isArray(blockHash) ? blockHash[0] : blockHash;
     const senderRow = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
     const senderName = senderRow.rows[0]?.username || '有人';
     const nd = await pool.query(
       `SELECT d.id, d.title FROM documents d
        JOIN document_blocks db ON db.document_id = d.id
        WHERE db.block_hash = $1 AND d.canonical_document_id IS NULL LIMIT 1`
+      , [normalizedBlockHash]
     ).then(r => r.rows[0]);
 
     await createNotification({
@@ -86,7 +88,7 @@ export async function sendLikeNotification(data: LikeNotificationData): Promise<
         commentId,
         documentId: nd?.id,
         documentTitle: nd?.title,
-        blockHash: Array.isArray(blockHash) ? blockHash[0] : blockHash,
+        blockHash: normalizedBlockHash,
         originalContent: content?.slice(0, 150),
       },
     });

@@ -10,6 +10,8 @@ import { pool } from '../config/database.js';
 
 let authToken: string;
 let testUserId: string;
+let adminToken: string;
+let adminUserId: string;
 let testDocumentId: string;
 let testBlockHash: string;
 let testCommentId: string;
@@ -17,6 +19,9 @@ let testCommentId: string;
 const TEST_EMAIL = `comment_test_${Date.now()}@example.com`;
 const TEST_PASSWORD = 'CommentTest123!';
 const TEST_USERNAME = 'comment_tester';
+const ADMIN_TEST_EMAIL = `comment_admin_test_${Date.now()}@example.com`;
+const ADMIN_TEST_PASSWORD = 'CommentAdminTest123!';
+const ADMIN_TEST_USERNAME = 'comment_admin_tester';
 
 describe('Comment System Tests', () => {
   beforeAll(async () => {
@@ -40,6 +45,24 @@ describe('Comment System Tests', () => {
 
     if (loginRes.status === 200) {
       authToken = loginRes.body.token;
+    }
+
+    // 创建 admin 测试用户
+    const adminPasswordHash = await bcrypt.hash(ADMIN_TEST_PASSWORD, 10);
+    const adminUserResult = await pool.query(
+      `INSERT INTO users (email, username, password_hash, email_verified, is_admin)
+       VALUES ($1, $2, $3, true, true)
+       RETURNING id`,
+      [ADMIN_TEST_EMAIL, ADMIN_TEST_USERNAME, adminPasswordHash]
+    );
+    adminUserId = adminUserResult.rows[0].id;
+
+    const adminLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: ADMIN_TEST_EMAIL, password: ADMIN_TEST_PASSWORD });
+
+    if (adminLoginRes.status === 200) {
+      adminToken = adminLoginRes.body.token;
     }
 
     // 创建测试文档和内容块
@@ -77,8 +100,11 @@ describe('Comment System Tests', () => {
     // 清理测试数据
     try {
       await pool.query('DELETE FROM comments WHERE user_id = $1', [testUserId]);
+      await pool.query('DELETE FROM comments WHERE user_id = $1', [adminUserId]);
+      await pool.query('DELETE FROM notifications WHERE user_id = $1', [adminUserId]);
       await pool.query('DELETE FROM documents WHERE user_id = $1', [testUserId]);
       await pool.query('DELETE FROM users WHERE id = $1', [testUserId]);
+      await pool.query('DELETE FROM users WHERE id = $1', [adminUserId]);
     } catch (e) {
       console.error('Cleanup error:', e);
     }
@@ -252,6 +278,58 @@ describe('Comment System Tests', () => {
         .post(`/api/comments/${testCommentId}/like`);
 
       expect(likeRes.status).toBe(401);
+    });
+
+    it('用户给 admin 点赞后，admin 应该收到 like 通知', async () => {
+      if (!testBlockHash || !adminToken || !authToken || !adminUserId) return;
+
+      // 先清理 admin 旧通知，避免干扰断言
+      await pool.query('DELETE FROM notifications WHERE user_id = $1', [adminUserId]);
+
+      // admin 创建评论
+      const adminCommentRes = await request(app)
+        .post('/api/comments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          content: '这是 admin 的评论，等待被点赞',
+          blockHash: testBlockHash,
+        });
+
+      expect(adminCommentRes.status).toBe(201);
+      const adminCommentId = adminCommentRes.body.comment.id;
+
+      // 普通用户点赞 admin 评论
+      const likeRes = await request(app)
+        .post(`/api/comments/${adminCommentId}/like`)
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(likeRes.status).toBe(200);
+      expect(likeRes.body).toHaveProperty('liked', true);
+
+      // 点赞通知在 Redis 分支下是异步触发，做短轮询
+      let unreadCount = 0;
+      for (let i = 0; i < 10; i++) {
+        const unreadRes = await request(app)
+          .get('/api/notifications/unread-count')
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(unreadRes.status).toBe(200);
+        unreadCount = unreadRes.body.count;
+        if (unreadCount > 0) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      expect(unreadCount).toBeGreaterThan(0);
+
+      const notificationsRes = await request(app)
+        .get('/api/notifications?unread=true')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(notificationsRes.status).toBe(200);
+      expect(Array.isArray(notificationsRes.body.notifications)).toBe(true);
+      expect(
+        notificationsRes.body.notifications.some((n: any) => n.type === 'like')
+      ).toBe(true);
     });
   });
 

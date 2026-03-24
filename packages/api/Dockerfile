@@ -4,10 +4,16 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-COPY package.json ./
-RUN pnpm install
-COPY . .
-RUN pnpm build
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/api/package.json ./packages/api/package.json
+RUN pnpm install --frozen-lockfile
+
+COPY packages/types ./packages/types
+COPY packages/api ./packages/api
+
+RUN pnpm --filter @collab/types build
+RUN pnpm --filter @collab/api build
 
 # 生产阶段
 FROM node:20-alpine
@@ -16,11 +22,14 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-COPY package.json ./
-RUN pnpm install --production
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/api/package.json ./packages/api/package.json
+RUN pnpm install --filter @collab/api... --prod --frozen-lockfile
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/packages/types/dist ./packages/types/dist
+COPY --from=builder /app/packages/api/dist ./packages/api/dist
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "packages/api/dist/index.js"]
