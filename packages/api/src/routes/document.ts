@@ -219,57 +219,124 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
     // 计算文件哈希 (用于秒传)
     const crypto = await import('crypto');
     const fileHash = crypto.createHash('md5').update(content).digest('hex');
+    let docId = '';
+    let responseDocument: {
+      id: string;
+      title: string;
+      word_count: number;
+      block_count: number;
+      status: 'ready' | 'processing';
+      created_at: string;
+    };
+    let responseMessage: string | undefined;
+    let shouldProcessDocument = false;
 
-    // 全局查找相同文件哈希（跨用户去重）
-    const existing = await pool.query(
-      `SELECT id, user_id, word_count, block_count, status, created_at
-       FROM documents
-       WHERE file_hash = $1 AND status = 'ready'
-       LIMIT 1`,
-      [fileHash]
-    );
+    // 数据库级并发去重：同 file_hash 在同一时刻仅允许一个上传流程决策
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [fileHash]);
 
-    if (existing.rows.length > 0) {
-      const canonical = existing.rows[0];
-      if (canonical.user_id === userId) {
-        // 同一用户重复上传
-        logger.info(`Document already exists for same user: ${fileHash}`);
-        return res.json({
-          document: canonical,
-          message: 'Document already processed (quick upload)',
-        });
-      }
-      // 不同用户上传同一文件 → 创建引用行，复用 blocks，无需重新处理
-      const refResult = await pool.query(
-        `INSERT INTO documents (user_id, title, file_hash, status, canonical_document_id, word_count, block_count)
-         VALUES ($1, $2, $3, 'ready', $4, $5, $6)
-         RETURNING id, created_at`,
-        [userId, title, fileHash, canonical.id, canonical.word_count, canonical.block_count]
+      // 同一用户已有同哈希文档：直接返回，避免重复创建引用
+      const selfExisting = await client.query(
+        `SELECT id, title, word_count, block_count, status, created_at
+         FROM documents
+         WHERE user_id = $1 AND file_hash = $2 AND status IN ('ready', 'processing')
+         ORDER BY CASE status WHEN 'ready' THEN 0 ELSE 1 END, created_at ASC
+         LIMIT 1`,
+        [userId, fileHash]
       );
-      logger.info(`Document deduped via canonical ${canonical.id}: ${refResult.rows[0].id}`);
-      return res.json({
-        document: {
-          id: refResult.rows[0].id,
-          title,
-          word_count: canonical.word_count,
-          block_count: canonical.block_count,
-          status: 'ready',
-          created_at: refResult.rows[0].created_at,
-        },
-        message: 'Document instantly available (deduped)',
-      });
+
+      if (selfExisting.rows.length > 0) {
+        const selfDoc = selfExisting.rows[0];
+        responseDocument = {
+          id: selfDoc.id,
+          title: selfDoc.title,
+          word_count: selfDoc.word_count ?? 0,
+          block_count: selfDoc.block_count ?? 0,
+          status: selfDoc.status,
+          created_at: selfDoc.created_at,
+        };
+        responseMessage = selfDoc.status === 'ready'
+          ? 'Document already processed (quick upload)'
+          : 'Document is already being processed';
+      } else {
+        // 选 canonical（ready 优先，其次 processing）
+        const canonicalResult = await client.query(
+          `SELECT id, word_count, block_count, status
+           FROM documents
+           WHERE file_hash = $1
+             AND canonical_document_id IS NULL
+             AND status IN ('ready', 'processing')
+           ORDER BY CASE status WHEN 'ready' THEN 0 ELSE 1 END, created_at ASC
+           LIMIT 1
+           FOR UPDATE`,
+          [fileHash]
+        );
+
+        if (canonicalResult.rows.length > 0) {
+          const canonical = canonicalResult.rows[0];
+          const refResult = await client.query(
+            `INSERT INTO documents (user_id, title, file_hash, status, canonical_document_id, word_count, block_count)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, created_at`,
+            [
+              userId,
+              title,
+              fileHash,
+              canonical.status,
+              canonical.id,
+              canonical.word_count ?? 0,
+              canonical.block_count ?? 0,
+            ]
+          );
+
+          responseDocument = {
+            id: refResult.rows[0].id,
+            title,
+            word_count: canonical.word_count ?? 0,
+            block_count: canonical.block_count ?? 0,
+            status: canonical.status,
+            created_at: refResult.rows[0].created_at,
+          };
+
+          responseMessage = canonical.status === 'ready'
+            ? 'Document instantly available (deduped)'
+            : 'Document deduped, still processing';
+
+          logger.info(`Document deduped via canonical ${canonical.id}: ${refResult.rows[0].id}`);
+        } else {
+          // 只有在完全没有 canonical 时，才创建新的处理任务
+          const docResult = await client.query(
+            `INSERT INTO documents (user_id, title, file_hash, status, content)
+             VALUES ($1, $2, $3, 'processing', $4)
+             RETURNING id, created_at`,
+            [userId, title, fileHash, content]
+          );
+
+          docId = docResult.rows[0].id;
+          responseDocument = {
+            id: docId,
+            title,
+            word_count: content.length,
+            block_count: 0,
+            status: 'processing',
+            created_at: docResult.rows[0].created_at,
+          };
+          shouldProcessDocument = true;
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
-    // 创建新文档记录
-    const docResult = await pool.query(
-      'INSERT INTO documents (user_id, title, file_hash, status, content) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at',
-      [userId, title, fileHash, 'processing', content]
-    );
-
-    const docId = docResult.rows[0].id;
-
     // 测试环境同步处理文档，避免依赖外部 worker
-    if (process.env.NODE_ENV === 'test') {
+    if (shouldProcessDocument && process.env.NODE_ENV === 'test') {
       try {
         const { createHash } = await import('crypto');
         const blocks = content.split(/\r?\n/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
@@ -305,22 +372,17 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
         await pool.query("UPDATE documents SET status = 'error' WHERE id = $1", [docId]);
         throw error;
       }
-    } else {
+    } else if (shouldProcessDocument) {
       // 生产环境：将处理任务推入 BullMQ 队列，立即返回给前端
       await documentQueue.add('process-document', { documentId: docId });
       logger.info(`Document queued for processing: ${docId}`);
     }
 
-    res.json({
-      document: {
-        id: docId,
-        title,
-        word_count: content.length,   // 字符数作为初始估算值
-        block_count: 0,
-        status: 'processing',
-        created_at: docResult.rows[0].created_at,
-      },
-    });
+    if (responseMessage) {
+      return res.json({ document: responseDocument, message: responseMessage });
+    }
+
+    return res.json({ document: responseDocument });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', details: error.errors });

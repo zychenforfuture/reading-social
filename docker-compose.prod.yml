@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # PostgreSQL - 元数据数据库
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: collab-postgres
     restart: unless-stopped
     environment:
@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_INITDB_ARGS: --encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
-      - ./volumes/postgres/data:/var/lib/postgresql/data
+      - ./volumes/postgres/data-prod:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d collab_comments"]
@@ -58,8 +58,8 @@ services:
   # API 服务
   api:
     build:
-      context: ./packages/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/api/Dockerfile
     container_name: collab-api
     restart: unless-stopped
     environment:
@@ -75,6 +75,9 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
+      ADMIN_INIT_EMAIL: ${ADMIN_INIT_EMAIL:-}
+      ADMIN_INIT_USERNAME: ${ADMIN_INIT_USERNAME:-}
+      ADMIN_INIT_PASSWORD: ${ADMIN_INIT_PASSWORD:-}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     depends_on:
       postgres:
@@ -94,8 +97,8 @@ services:
   # Worker 服务
   worker:
     build:
-      context: ./packages/worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/worker/Dockerfile
     container_name: collab-worker
     restart: unless-stopped
     environment:
@@ -121,8 +124,8 @@ services:
   # 前端服务 (Nginx)
   web:
     build:
-      context: ./packages/web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/web/Dockerfile
       args:
         VITE_API_URL: /api
     container_name: collab-web

@@ -207,7 +207,7 @@ const fingerprintWorker = new Worker(
         `UPDATE documents
          SET word_count = $1, block_count = $2, status = $3, content = NULL,
              doc_simhash = $4, doc_b0 = $5, doc_b1 = $6, doc_b2 = $7, doc_b3 = $8
-         WHERE id = $9`,
+         WHERE id = $9 OR canonical_document_id = $9`,
         [content.length, blocks.length, 'ready',
          docSimHash, docSimHash.slice(0, 4), docSimHash.slice(4, 8),
          docSimHash.slice(8, 12), docSimHash.slice(12, 16),
@@ -289,7 +289,7 @@ const fingerprintWorker = new Worker(
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(`Error processing document ${documentId}: ${msg}`);
       await pool.query(
-        "UPDATE documents SET status = 'error' WHERE id = $1",
+        "UPDATE documents SET status = 'error' WHERE id = $1 OR canonical_document_id = $1",
         [documentId]
       );
       throw error;

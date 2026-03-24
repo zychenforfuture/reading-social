@@ -334,8 +334,10 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
 // 点赞 / 取消点赞
 router.post('/:id/like', authenticate, async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const userId = (req.user as AuthPayload).userId;
+    const rawId = req.params.id;
+    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+    const rawUserId = (req.user as AuthPayload).userId;
+    const userId = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
 
     const commentRow = await pool.query(
       'SELECT block_hash, user_id, content FROM comments WHERE id = $1 AND is_deleted = false',

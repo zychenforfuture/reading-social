@@ -85,6 +85,23 @@ docker compose -f docker-compose.test.yml down
 
 ## 4. 常见问题
 
+### 通知集成测试（本地开发库）
+
+当你直接用开发库运行通知相关集成测试（例如点赞后通知）时，建议按以下顺序执行：
+
+```bash
+docker compose up -d postgres redis
+set -a && source .env && set +a
+docker exec -i collab-postgres psql -U admin -d collab_comments < docker/postgres/init.sql
+pnpm --filter @collab/api test -- src/__tests__/comment.test.ts -t "用户给 admin 点赞后，admin 应该收到 like 通知"
+```
+
+说明：
+
+- 如果未加载 .env，可能出现 PG 认证失败或 Redis NOAUTH。
+- 如果库未初始化，可能出现 relation "users" does not exist、relation "comments" does not exist。
+- init.sql 中的 vector 扩展在无 pgvector 环境会报错，但不影响通知相关表创建与测试执行。
+
 ### 端口占用
 
 ```bash

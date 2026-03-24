@@ -44,6 +44,14 @@ pnpm install
 
 说明：`dev:all` 采用混合模式，会启动 postgres、redis、qdrant（容器），并在本机拉起 API、Worker、Web。
 
+从本次版本开始，`./scripts/dev.sh up` 与 `pnpm run dev:all` 会自动执行以下对齐动作，减少“全 Docker 切到混合部署”时的环境漂移问题：
+
+- 自动对齐 `DATABASE_URL` 与 `DB_PASSWORD`
+- 自动对齐 `REDIS_URL` 与 `REDIS_PASSWORD`
+- 自动等待 PostgreSQL / Redis 就绪
+- 自动校准 PostgreSQL 用户密码
+- 核心表缺失时自动执行 `docker/postgres/init.sql` 初始化
+
 ### 2.1 首次启动说明
 
 首次运行 `pnpm run dev:all` 时，系统会自动完成以下初始化：
@@ -109,6 +117,24 @@ docker compose exec postgres printenv | egrep "POSTGRES|DB|PASSWORD|USER"
 ```bash
 docker compose exec postgres bash -lc "psql -U admin -d postgres -c \"ALTER USER admin WITH PASSWORD '$DB_PASSWORD';\""
 ```
+
+### 混合部署切换后出现鉴权/缺表问题
+
+典型现象：
+
+- `SASL: ... client password must be a string`
+- `NOAUTH Authentication required`
+- `relation "users" does not exist` 或 `relation "comments" does not exist`
+
+推荐修复：
+
+```bash
+./scripts/dev.sh down
+./scripts/dev.sh infra
+./scripts/dev.sh up
+```
+
+上述流程会触发脚本内置的凭据对齐与表结构自检/初始化逻辑。
 
 ### JWT_SECRET 相关问题
 
