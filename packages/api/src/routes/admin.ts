@@ -20,7 +20,7 @@ router.use(authenticate, requireAdmin);
  *       200:
  *         description: System statistics
  */
-router.get('/stats', async (req: Request, res: Response) => {
+router.get('/stats', async (_req: Request, res: Response) => {
   try {
     const [usersResult, docsResult, commentsResult, blocksResult] = await Promise.all([
       pool.query('SELECT COUNT(*) as count, COUNT(*) FILTER (WHERE is_admin = true) as admin_count FROM users'),

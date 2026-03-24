@@ -1,6 +1,5 @@
 import { useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
-import { cn } from '../../lib/utils';
 
 interface CommentFormProps {
   selectedBlock: { hash: string; text: string } | null;

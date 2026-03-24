@@ -192,7 +192,7 @@ export default function ProfilePage() {
             {/* 当前头像信息 */}
             <div className="flex items-center gap-4">
               <AvatarDisplay
-                avatarUrl={selectedAvatar || user?.avatar_url}
+                avatarUrl={selectedAvatar || user?.avatar_url || ''}
                 username={user?.username}
                 size={72}
               />

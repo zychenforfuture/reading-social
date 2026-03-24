@@ -42,7 +42,7 @@ export default function CommentPanel({
   documentId,
   comments,
   selectedBlock,
-  onClearSelection,
+  onClearSelection: _onClearSelection,
   open,
   onClose,
   focusCommentIds,

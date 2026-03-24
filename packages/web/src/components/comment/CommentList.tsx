@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { MessageSquare, ThumbsUp } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import { type Comment, cn, timeAgo } from '../../lib/utils';
 import { Avatar } from './Avatar';
 import ReplySection from './ReplySection';

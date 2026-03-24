@@ -269,7 +269,6 @@
 如果以上 FAQ 没有解决你的问题，欢迎：
 
 - 📧 发送邮件至：support@resonant.reading
-- 💬 加入社群：[Discord 链接] / [微信群二维码]
 - 🐛 提交 Issue：[GitHub Issues](https://github.com/yourusername/resonant-reading/issues)
 
 我们会尽快回复！

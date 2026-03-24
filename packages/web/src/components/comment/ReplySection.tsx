@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Comment, cn, timeAgo } from '../../lib/utils';
-import { useUserStore } from '../../stores/userStore';
 import { Avatar } from './Avatar';
 import { ThumbsUp, CornerDownRight, ChevronDown, ChevronUp, X, Send } from 'lucide-react';
 

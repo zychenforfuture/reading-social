@@ -18,6 +18,7 @@
     "validate-env": "tsx src/scripts/validate-env.ts"
   },
   "dependencies": {
+    "@collab/types": "workspace:*",
     "@qdrant/js-client-rest": "^1.13.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.41.0",

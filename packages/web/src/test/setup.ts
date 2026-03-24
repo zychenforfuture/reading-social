@@ -39,6 +39,15 @@ if (typeof window.WebSocket === 'undefined') {
   }));
 }
 
+if (typeof window.EventSource === 'undefined') {
+  window.EventSource = vi.fn().mockImplementation(() => ({
+    close: vi.fn(),
+    onmessage: null,
+    onerror: null,
+    onopen: null,
+  }));
+}
+
 // Mock ES Module
 vi.mock('y-websocket', () => ({
   WebrtcProvider: vi.fn(),

@@ -1,7 +1,6 @@
-import { Router, type Request, type Response } from 'express';
+import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { computeSimHash, hammingDistance, calculateSimilarityScore } from '../utils/simhash.js';
 
 const router: Router = Router();
 
