@@ -45,8 +45,8 @@ usage() {
 用法：$0 {up|infra|down|logs|status}
 
 命令说明：
-  up       启动混合模式（Docker 基础设施 + 本地 API/Worker/Web 进程）
-  infra    仅启动基础设施容器（PostgreSQL + Redis + Qdrant）
+  up       启动混合模式（Docker 基础设施 + 本地 API/Worker/Web 进程，自动对齐凭据与表结构）
+  infra    仅启动基础设施容器（PostgreSQL + Redis + Qdrant，自动对齐凭据与表结构）
   down     停止基础设施容器
   logs     查看基础设施日志（按 Ctrl+C 退出）
   status   查看基础设施容器状态
@@ -78,10 +78,137 @@ load_env() {
   set +a
 }
 
+normalize_runtime_env() {
+  local db_pass_from_url redis_pass_from_url
+
+  db_pass_from_url="$(printf '%s' "${DATABASE_URL:-}" | sed -n 's#^[^:]*://[^:]*:\([^@/]*\)@.*#\1#p')"
+  redis_pass_from_url="$(printf '%s' "${REDIS_URL:-}" | sed -n 's#^redis://:\([^@/]*\)@.*#\1#p')"
+
+  if [ -z "${DB_PASSWORD:-}" ] && [ -n "$db_pass_from_url" ]; then
+    DB_PASSWORD="$db_pass_from_url"
+    export DB_PASSWORD
+  fi
+
+  if [ -z "${REDIS_PASSWORD:-}" ] && [ -n "$redis_pass_from_url" ]; then
+    REDIS_PASSWORD="$redis_pass_from_url"
+    export REDIS_PASSWORD
+  fi
+
+  if [ -z "${DB_PASSWORD:-}" ]; then
+    DB_PASSWORD='CollabDev2026!'
+    export DB_PASSWORD
+  fi
+
+  if [ -z "${REDIS_PASSWORD:-}" ]; then
+    REDIS_PASSWORD='CollabDev2026!'
+    export REDIS_PASSWORD
+  fi
+
+  if [ -z "${DATABASE_URL:-}" ] || [ "${DB_PASSWORD}" != "${db_pass_from_url:-}" ]; then
+    DATABASE_URL="postgresql://admin:${DB_PASSWORD}@localhost:5432/collab_comments"
+    export DATABASE_URL
+    echo -e "${YELLOW}已对齐 DATABASE_URL 与 DB_PASSWORD。${NC}"
+  fi
+
+  if [ -z "${REDIS_URL:-}" ] || [ "${REDIS_PASSWORD}" != "${redis_pass_from_url:-}" ]; then
+    REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379"
+    export REDIS_URL
+    echo -e "${YELLOW}已对齐 REDIS_URL 与 REDIS_PASSWORD。${NC}"
+  fi
+
+  if [ -z "${QDRANT_URL:-}" ]; then
+    QDRANT_URL='http://localhost:6333'
+    export QDRANT_URL
+  fi
+}
+
 start_infra() {
   echo -e "${YELLOW}启动基础设施容器 (postgres + redis + qdrant)...${NC}"
   $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d postgres redis qdrant
   echo -e "${GREEN}✓ 基础设施已启动${NC}"
+}
+
+wait_for_infra() {
+  local retries=30
+
+  echo -e "${YELLOW}等待基础设施就绪...${NC}"
+  while [ "$retries" -gt 0 ]; do
+    if docker exec collab-postgres pg_isready -U admin -d collab_comments >/dev/null 2>&1; then
+      break
+    fi
+    retries=$((retries - 1))
+    sleep 1
+  done
+
+  if [ "$retries" -le 0 ]; then
+    echo -e "${RED}✗ PostgreSQL 未在预期时间内就绪。${NC}"
+    exit 1
+  fi
+
+  retries=30
+  while [ "$retries" -gt 0 ]; do
+    if docker exec collab-redis redis-cli ping >/dev/null 2>&1; then
+      break
+    fi
+    retries=$((retries - 1))
+    sleep 1
+  done
+
+  if [ "$retries" -le 0 ]; then
+    echo -e "${RED}✗ Redis 未在预期时间内就绪。${NC}"
+    exit 1
+  fi
+
+  echo -e "${GREEN}✓ 基础设施健康检查通过${NC}"
+}
+
+ensure_postgres_password() {
+  local escaped_db_password
+  escaped_db_password=${DB_PASSWORD//\'/\'\'}
+
+  docker exec collab-postgres psql -U admin -d postgres -c "ALTER USER admin WITH PASSWORD '${escaped_db_password}';" >/dev/null
+  echo -e "${GREEN}✓ PostgreSQL 凭据已对齐${NC}"
+}
+
+ensure_core_schema() {
+  local has_schema
+  has_schema="$(docker exec collab-postgres psql -U admin -d collab_comments -tAc "SELECT (to_regclass('public.users') IS NOT NULL AND to_regclass('public.comments') IS NOT NULL AND to_regclass('public.notifications') IS NOT NULL)::int;" 2>/dev/null | tr -d '[:space:]')"
+
+  if [ "$has_schema" = "1" ]; then
+    echo -e "${GREEN}✓ 核心表结构已存在${NC}"
+    return
+  fi
+
+  echo -e "${YELLOW}检测到核心表结构缺失，正在初始化数据库...${NC}"
+  if ! docker exec -i collab-postgres psql -U admin -d collab_comments < docker/postgres/init.sql >/dev/null 2>&1; then
+    echo -e "${RED}✗ 执行数据库初始化脚本失败。${NC}"
+    exit 1
+  fi
+
+  has_schema="$(docker exec collab-postgres psql -U admin -d collab_comments -tAc "SELECT (to_regclass('public.users') IS NOT NULL AND to_regclass('public.comments') IS NOT NULL AND to_regclass('public.notifications') IS NOT NULL)::int;" 2>/dev/null | tr -d '[:space:]')"
+  if [ "$has_schema" != "1" ]; then
+    echo -e "${RED}✗ 数据库初始化后核心表仍缺失，请检查 docker/postgres/init.sql。${NC}"
+    exit 1
+  fi
+
+  echo -e "${GREEN}✓ 核心表结构初始化完成${NC}"
+}
+
+ensure_redis_password() {
+  if ! docker exec collab-redis redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping >/dev/null 2>&1; then
+    echo -e "${RED}✗ Redis 密码校验失败，请检查 REDIS_PASSWORD 与 REDIS_URL。${NC}"
+    exit 1
+  fi
+
+  echo -e "${GREEN}✓ Redis 凭据已对齐${NC}"
+}
+
+reconcile_mixed_runtime() {
+  normalize_runtime_env
+  wait_for_infra
+  ensure_postgres_password
+  ensure_core_schema
+  ensure_redis_password
 }
 
 stop_infra() {
@@ -138,12 +265,14 @@ case "${1:-}" in
     ensure_env_file
     load_env
     start_infra
+    reconcile_mixed_runtime
     run_app_processes
     ;;
   infra)
     ensure_env_file
     load_env
     start_infra
+    reconcile_mixed_runtime
     infra_status
     ;;
   down)

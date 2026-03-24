@@ -107,6 +107,17 @@ describe('Concurrency Tests - 并发测试', () => {
           expect(res2.body.message).toContain('deduped');
         }
       }
+
+      // 数据库级保证：同 file_hash 在 processing/ready 阶段只能有一个 canonical
+      const canonicalCount = await pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM documents
+         WHERE file_hash = $1
+           AND canonical_document_id IS NULL
+           AND status IN ('processing', 'ready')`,
+        [fileHash]
+      );
+      expect(canonicalCount.rows[0].count).toBe(1);
     });
   });
 
