@@ -5,6 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/__tests__/**/*.test.ts'],
+    globalSetup: ['./vitest.setup.ts'],
     testTimeout: 60000, // 60 秒超时（集成测试需要更长时间）
     coverage: {
       enabled: false,
