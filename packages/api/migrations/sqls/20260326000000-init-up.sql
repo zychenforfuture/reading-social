@@ -1,16 +1,11 @@
-CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email VARCHAR(255) UNIQUE NOT NULL,
-  username VARCHAR(50) NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  avatar_url TEXT,
-  is_admin BOOLEAN DEFAULT false,
-  email_verified BOOLEAN DEFAULT false,
-  verification_token VARCHAR(64),
-  verification_token_expires TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- 这个迁移假定基础表已经由 docker/postgres/init.sql 创建
+-- 为 users 表添加 auth 新增的字段
+ALTER TABLE users 
+  ADD COLUMN IF NOT EXISTS avatar_url TEXT,
+  ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS verification_token VARCHAR(64),
+  ADD COLUMN IF NOT EXISTS verification_token_expires TIMESTAMPTZ;
 
 UPDATE users SET email_verified = true
 WHERE email_verified IS NULL OR email_verified = false
