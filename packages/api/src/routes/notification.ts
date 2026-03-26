@@ -6,31 +6,6 @@ import { authenticate } from '../middleware/auth.js';
 
 const router: Router = Router();
 
-// ─── DB 迁移（首次启动自动执行）────────────────────────────────────
-(async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS notifications (
-        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        type         VARCHAR(50)  NOT NULL,          -- reply | mention | like
-        title        VARCHAR(200) NOT NULL,
-        content      TEXT,
-        data         JSONB        NOT NULL DEFAULT '{}',
-        is_read      BOOLEAN      NOT NULL DEFAULT false,
-        created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_notifications_user
-        ON notifications(user_id, created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_notifications_unread
-        ON notifications(user_id) WHERE is_read = false;
-    `);
-    logger.info('Notifications table ready');
-  } catch (err) {
-    logger.error('Notifications migration error:', err);
-  }
-})();
-
 // ─── 固定路由（必须在 /:id 参数路由之前注册）────────────────────────
 
 // GET /unread-count — 未读数角标用

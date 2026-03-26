@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/worker/package.json ./packages/worker/package.json
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
 COPY packages/worker ./packages/worker
 RUN pnpm --filter @collab/worker build
@@ -20,7 +20,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/worker/package.json ./packages/worker/package.json
-RUN pnpm install --filter @collab/worker --prod --frozen-lockfile
+RUN pnpm install --filter @collab/worker --prod
 
 COPY --from=builder /app/packages/worker/dist ./packages/worker/dist
 
