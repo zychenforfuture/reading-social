@@ -10,81 +10,15 @@ const router: Router = Router();
 
 const SALT_ROUNDS = 10;
 
-// 启动时执行迁移，添加邮箱验证字段及 OTP 表
-async function runMigration() {
+// 启动时初始化：同步管理员状态并自动创建初始管理员账号
+async function initAuth() {
   try {
-    await pool.query(`
-      ALTER TABLE users
-        ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false,
-        ADD COLUMN IF NOT EXISTS verification_token VARCHAR(64),
-        ADD COLUMN IF NOT EXISTS verification_token_expires TIMESTAMPTZ;
-    `);
-    // 将老用户标记为已验证，避免影响现有账号
-    await pool.query(`
-      UPDATE users SET email_verified = true
-      WHERE email_verified IS NULL OR email_verified = false
-        AND verification_token IS NULL;
-    `);
-    // OTP 表
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS email_otps (
-        id SERIAL PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        code VARCHAR(6) NOT NULL,
-        purpose VARCHAR(20) NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);
-    `);
-    // 将 avatar_url 字段扩展为 TEXT（支持 base64 图片）
-    await pool.query(`
-      ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;
-    `);
-    // 为 SimHash LSH 加 4 个 band 列（如已存在则跳过）
-    await pool.query(`
-      ALTER TABLE content_blocks
-        ADD COLUMN IF NOT EXISTS sh_b0 VARCHAR(4),
-        ADD COLUMN IF NOT EXISTS sh_b1 VARCHAR(4),
-        ADD COLUMN IF NOT EXISTS sh_b2 VARCHAR(4),
-        ADD COLUMN IF NOT EXISTS sh_b3 VARCHAR(4);
-      CREATE INDEX IF NOT EXISTS idx_cb_sh_b0 ON content_blocks(sh_b0) WHERE sh_b0 IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_cb_sh_b1 ON content_blocks(sh_b1) WHERE sh_b1 IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_cb_sh_b2 ON content_blocks(sh_b2) WHERE sh_b2 IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_cb_sh_b3 ON content_blocks(sh_b3) WHERE sh_b3 IS NOT NULL;
-    `);
-    // 失败嵌入记录表（用于重试，worker 依赖此表）
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS failed_embeddings (
-        block_hash VARCHAR(64) PRIMARY KEY REFERENCES content_blocks(block_hash) ON DELETE CASCADE,
-        error_message TEXT,
-        retry_count INTEGER DEFAULT 0,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry ON failed_embeddings(created_at);
-    `);
-    // 文档级 SimHash（优化三：文档近似去重，跨用户同书识别）
-    await pool.query(`
-      ALTER TABLE documents
-        ADD COLUMN IF NOT EXISTS doc_simhash VARCHAR(16),
-        ADD COLUMN IF NOT EXISTS doc_b0 VARCHAR(4),
-        ADD COLUMN IF NOT EXISTS doc_b1 VARCHAR(4),
-        ADD COLUMN IF NOT EXISTS doc_b2 VARCHAR(4),
-        ADD COLUMN IF NOT EXISTS doc_b3 VARCHAR(4);
-      CREATE INDEX IF NOT EXISTS idx_documents_doc_b0 ON documents(doc_b0) WHERE doc_b0 IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_documents_doc_b1 ON documents(doc_b1) WHERE doc_b1 IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_documents_doc_b2 ON documents(doc_b2) WHERE doc_b2 IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_documents_doc_b3 ON documents(doc_b3) WHERE doc_b3 IS NOT NULL;
-    `);
-    logger.info('Auth migration: email_verified + email_otps + avatar_url(TEXT) + failed_embeddings + doc_simhash ready');
-
     // 同步管理员状态
     await syncAdminEmails();
     // 创建初始管理员
     await createInitialAdmin();
   } catch (err) {
-    logger.error('Auth migration error:', err);
+    logger.error('Auth init error:', err);
   }
 }
 
@@ -136,7 +70,7 @@ async function syncAdminEmails() {
   return result.rowCount ?? 0;
 }
 
-runMigration();
+initAuth();
 
 // 注册请求验证 schema
 const registerSchema = z.object({

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
 import { api, type ContentBlock, type Comment, type Document as DocEntry } from '../lib/utils';
+import { useCommentSSE } from '../hooks/useCommentSSE';
 import CommentPanel from '../components/CommentPanel';
 import TableOfContents from '../components/TableOfContents';
 import ReadingSettings, { loadSettings } from '../components/document/ReadingSettings';
@@ -113,101 +114,7 @@ export default function DocumentPage() {
   });
 
   // SSE 实时推送：有新评论时刷新评论数据
-  useEffect(() => {
-    if (!id) return;
-
-    let es: EventSource | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let retries = 0;
-    const MAX_RETRIES = 10;
-
-    const connect = () => {
-      // 读取 token，通过 Cookie 传递（EventSource 不支持设置 Header）
-      // 后端支持：Cookie > Query Param，优先使用 Cookie
-      let token = '';
-      try {
-        const stored = localStorage.getItem('collab-auth');
-        if (stored) token = JSON.parse(stored)?.state?.token ?? '';
-      } catch {}
-
-      // 设置 Cookie（与后端 Cookie 认证兼容）
-      if (token) {
-        document.cookie = `auth_token=${token}; path=/api; SameSite=Lax`;
-      }
-
-      // 不再通过 query param 传递 token（避免日志记录），后端从 Cookie 读取
-      const url = `/api/comments/stream/${id}`;
-      es = new EventSource(url, { withCredentials: true });
-
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'like_updated') {
-            // 点赞更新：直接修改缓存，不触发重新请求（保留 liked_by_me 状态）
-            queryClient.setQueryData(
-              ['document-comments', id],
-              (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
-                if (!old) return old;
-                return {
-                  ...old,
-                  comments: old.comments.map((c: Comment) =>
-                    c.id === data.commentId ? { ...c, like_count: data.likeCount } : c
-                  ),
-                };
-              }
-            );
-          } else if (data.type === 'new_reply') {
-            // 他人回复：根评论 reply_count +1
-            queryClient.setQueryData(
-              ['document-comments', id],
-              (old: { comments: Comment[]; blockCommentCount: Record<string, number> } | undefined) => {
-                if (!old) return old;
-                return {
-                  ...old,
-                  comments: old.comments.map((c: Comment) =>
-                    c.id === data.rootId ? { ...c, reply_count: c.reply_count + 1 } : c
-                  ),
-                };
-              }
-            );
-            // 如果已展开该回复列表，追加新回复
-            queryClient.setQueryData(
-              ['replies', data.rootId],
-              (old: { replies: Comment[] } | undefined) => {
-                if (!old) return old;
-                const exists = old.replies.some((r: Comment) => r.id === data.reply?.id);
-                if (exists) return old;
-                return { replies: [...old.replies, data.reply] };
-              }
-            );
-          } else {
-            // 新评论等其他事件：刷新评论列表
-            queryClient.invalidateQueries({ queryKey: ['document-comments', id] });
-          }
-        } catch {
-          queryClient.invalidateQueries({ queryKey: ['document-comments', id] });
-        }
-      };
-
-      es.onopen = () => { retries = 0; };
-
-      es.onerror = () => {
-        es?.close();
-        if (retries < MAX_RETRIES) {
-          // 指数退避重连：1s, 2s, 4s … 最够 30s
-          const delay = Math.min(1000 * 2 ** retries, 30000);
-          retries++;
-          retryTimer = setTimeout(connect, delay);
-        }
-      };
-    };
-
-    connect();
-    return () => {
-      es?.close();
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [id, queryClient]);
+  useCommentSSE(id);
 
   const blockCommentCount = useMemo(
     () => commentsData?.blockCommentCount ?? {},

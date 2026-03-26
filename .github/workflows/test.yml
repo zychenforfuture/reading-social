@@ -56,8 +56,10 @@ jobs:
       - name: Initialize test database schema
         run: |
           PGPASSWORD=testpassword psql -h 127.0.0.1 -p 5433 -U admin -d collab_comments_test -f docker/postgres/init.sql
+          pnpm --filter @collab/api run db:migrate
         env:
           PGPASSWORD: testpassword
+          DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
 
       - name: Wait for Postgres and Redis ports
         run: |

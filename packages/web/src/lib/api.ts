@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type {
   User,
   Document,
@@ -12,7 +13,6 @@ import type {
   AdminComment,
 } from './types.js';
 
-// @ts-ignore - 生产环境构建配置问题
 export const api: {
   baseURL: string;
   request<T>(endpoint: string, options?: RequestInit): Promise<T>;
@@ -235,7 +235,7 @@ export const api: {
     api.request<{ message: string }>(`/admin/comments/${id}`, { method: 'DELETE' }),
 };
 
-const likePending = new Map<string, { count: number; timer?: NodeJS.Timeout }>();
+const likePending = new Map<string, { count: number; timer?: ReturnType<typeof setTimeout> }>();
 
 export function likeCommentWithDebounce(commentId: string): Promise<{ liked: boolean; likeCount: number }> {
   const current = likePending.get(commentId) || { count: 0 };
