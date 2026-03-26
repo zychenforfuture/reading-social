@@ -12,17 +12,18 @@
 项目根目录需要一份 `.env` 文件。你可以在根目录（同 `docker-compose.yml` 层级）创建一个 `.env` 文件，内容参考如下：
 
 ```env
-# 核心秘钥和密码
-JWT_SECRET=your_super_secret_jwt_key_here
-DB_PASSWORD=CollabDev2026!
-REDIS_PASSWORD=CollabDev2026!
+# 核心秘钥和密码（生产环境必须替换为强随机值）
+JWT_SECRET=CHANGE_ME_strong_jwt_secret
+DB_PASSWORD=CHANGE_ME_strong_db_password
+REDIS_PASSWORD=CHANGE_ME_strong_redis_password
 
 # 服务地址配置
 FRONTEND_URL=http://localhost:5173
 NODE_ENV=development
 ```
 
-*(如果未提供 `.env`，`docker-compose.yml` 中已设置了适用于本地开发的 fallback 默认值。)*
+> [!WARNING]
+> **安全提示**：请务必将上述所有 `CHANGE_ME_*` 占位符替换为唯一的强随机密码，切勿在生产环境中直接使用任何示例值！
 
 ### 2. 构建并启动集群
 
@@ -38,7 +39,7 @@ docker-compose up -d --build
 
 > [!TIP]
 > **API 容器的自启动迁移机制**  
-> 在我们新的重构设计下，`collab-api` 在启动前会自动执行 `pnpm run db:migrate`。它会扫描最新的 `migrations/sqls` 下的 `.sql` 脚本，将所有尚未应用的表结构主动落库（如 Users, Documents 等表）。你不需要手动去连接数据库运行 SQL 脚本！
+> 在当前设计下，`collab-api` 在启动前会自动执行 `pnpm run db:migrate`。该命令使用 **db-migrate** 运行 `migrations` 目录下的 JS 迁移脚本，这些脚本内部会引用并执行 `migrations/sqls/*-up.sql` 中的具体 SQL。核心基础表结构（如基础 Users / Documents 等）首先由 `docker/postgres/init.sql` 初始化，SQL 迁移文件默认假定这些基础表已存在。正常情况下，你只需让容器按流程启动，无需手动连接数据库或单独执行 `migrations/sqls` 里的 SQL 脚本。
 
 ### 3. 查看运行状态
 
@@ -93,10 +94,8 @@ docker-compose logs -f worker
 > sudo rm -rf ./volumes
 > ```
 
-## 📋 容器间的包管理限制处理
+## 📋 容器间的包管理说明
 
-项目中在不同微服务间采取了不同的 Dockerfile 拆分构建和缓存层。如果你发现因锁文件 (`pnpm-lock.yaml`) 与新增加的 Node 依赖不同步导致的 `pnpm install` 失败：
-
-不要担心，目前最新的 `Dockerfile` 已经去掉了 `frozen-lockfile` 本地硬校验模式。利用 `--build` 构建镜像时，Docker 内部自带的环境（Node 20）将会智能拉取、更新依赖并抹平宿主机因版本太低而无从构建的痛点。
+项目中在不同微服务间采取了不同的 Dockerfile 拆分构建和缓存层。所有 Dockerfile 均使用 `--frozen-lockfile` 以确保构建的可重复性与确定性。如果你修改了依赖（`package.json`），请务必先在本地运行 `pnpm install` 以更新 `pnpm-lock.yaml`，然后再构建镜像。
 
 祝部署顺利！🚀

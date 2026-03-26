@@ -15,6 +15,9 @@ const connection = {
   password,
 };
 
+const _concurrency = parseInt(process.env.WORKER_CONCURRENCY ?? '', 10);
+const workerConcurrency = Number.isFinite(_concurrency) && _concurrency > 0 ? _concurrency : 2;
+
 // 初始化 Qdrant 集合（384 维，all-MiniLM-L6-v2）
 await initializeQdrantCollection();
 
@@ -219,7 +222,7 @@ const fingerprintWorker = new Worker(
       // ─── Embedding 后台异步，调度到专门的 BullMQ 队列 ───
       const embeddingJobs = newBlocks.map((block) => ({
         name: 'generate_embedding',
-        data: { documentId, block },
+        data: { documentId, blockHash: block.hash },
         opts: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 }
@@ -260,17 +263,27 @@ fingerprintWorker.on('failed', (job, err) => {
 const embeddingWorker = new Worker(
   'embedding-generation',
   async (job) => {
-    const { documentId, block } = job.data;
-    
+    const { blockHash } = job.data;
+
     // 跳过已存在于 Qdrant 的块（重复文档/重试场景）
-    if (await checkEmbeddingExists(block.hash)) {
+    if (await checkEmbeddingExists(blockHash)) {
       return { status: 'skipped, exists' };
     }
 
+    // 从数据库读取块内容（避免大文本通过 Redis 传输）
+    const blockRow = await pool.query(
+      'SELECT raw_content FROM content_blocks WHERE block_hash = $1',
+      [blockHash]
+    );
+    if (blockRow.rows.length === 0 || !blockRow.rows[0].raw_content) {
+      throw new Error(`Block ${blockHash} not found in content_blocks`);
+    }
+    const blockContent: string = blockRow.rows[0].raw_content;
+
     try {
-      const embedding = await generateEmbedding(block.content);
-      await storeEmbedding(block.hash, embedding);
-      logger.debug(`Stored embedding for block ${block.hash.substring(0, 8)}...`);
+      const embedding = await generateEmbedding(blockContent);
+      await storeEmbedding(blockHash, embedding);
+      logger.debug(`Stored embedding for block ${blockHash.substring(0, 8)}...`);
 
       // 查找向量相似块（只存 SimHash 未覆盖的语义相似对，避免冗余）
       const vectorSimilar = await findSimilarEmbeddings(embedding);
@@ -278,7 +291,7 @@ const embeddingWorker = new Worker(
         // 取出本块 SimHash 已记录的相似 hash 集合，用于去重
         const simhashCoveredResult = await pool.query(
           `SELECT similar_hash FROM similar_blocks WHERE block_hash = $1 AND algorithm = 'simhash'`,
-          [block.hash]
+          [blockHash]
         );
         const simhashCovered = new Set(simhashCoveredResult.rows.map((r: { similar_hash: string }) => r.similar_hash));
 
@@ -286,13 +299,13 @@ const embeddingWorker = new Worker(
         const vectorPlaceholders: string[] = [];
         let vp = 1;
         for (const vs of vectorSimilar) {
-          if (vs.block_hash === block.hash) continue;
+          if (vs.block_hash === blockHash) continue;
           if (simhashCovered.has(vs.block_hash)) continue; // SimHash 已覆盖，跳过
           const score = calculateVectorSimilarityScore(vs.score);
           vectorPlaceholders.push(`($${vp},$${vp+1},$${vp+2},$${vp+3})`);
           vectorPlaceholders.push(`($${vp+4},$${vp+5},$${vp+6},$${vp+7})`);
-          vectorValues.push(block.hash, vs.block_hash, score, 'embedding');
-          vectorValues.push(vs.block_hash, block.hash, score, 'embedding');
+          vectorValues.push(blockHash, vs.block_hash, score, 'embedding');
+          vectorValues.push(vs.block_hash, blockHash, score, 'embedding');
           vp += 8;
         }
         if (vectorPlaceholders.length > 0) {
@@ -306,24 +319,24 @@ const embeddingWorker = new Worker(
       }
       return { status: 'success' };
     } catch (embedError) {
-      logger.error(`Embedding failed for block ${block.hash.substring(0, 8)}:`, embedError);
+      logger.error(`Embedding failed for block ${blockHash.substring(0, 8)}:`, embedError);
       throw embedError;
     }
   },
   {
     connection,
-    concurrency: parseInt(process.env.WORKER_CONCURRENCY || '2', 10), // 控制 API 并发
+    concurrency: workerConcurrency,
   }
 );
 
 embeddingWorker.on('failed', async (job, err) => {
   logger.error(`Embedding Job ${job?.id} failed: ${err?.message ?? String(err)}`);
   if (job && job.attemptsMade === job.opts.attempts) {
-    const { block } = job.data;
+    const { blockHash } = job.data;
     try {
       await pool.query(
         'INSERT INTO failed_embeddings (block_hash, error_message, retry_count) VALUES ($1, $2, $3) ON CONFLICT (block_hash) DO UPDATE SET error_message = EXCLUDED.error_message, retry_count = EXCLUDED.retry_count, updated_at = NOW()',
-        [block.hash, err.message, job.attemptsMade]
+        [blockHash, err.message, job.attemptsMade]
       );
     } catch { /* ignore */ }
   }

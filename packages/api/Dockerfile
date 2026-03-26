@@ -7,8 +7,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/types/package.json ./packages/types/package.json
 COPY packages/api/package.json ./packages/api/package.json
-# Allow un-frozen install to pick up db-migrate changes
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 
 COPY packages/types ./packages/types
 COPY packages/api ./packages/api

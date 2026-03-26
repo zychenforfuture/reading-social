@@ -10,7 +10,7 @@ const router: Router = Router();
 
 const SALT_ROUNDS = 10;
 
-// 启动时初始化：同步管理员状态并自动创建出事管理员账号
+// 启动时初始化：同步管理员状态并自动创建初始管理员账号
 async function initAuth() {
   try {
     // 同步管理员状态

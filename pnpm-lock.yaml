@@ -38,6 +38,12 @@ importers:
       cors:
         specifier: ^2.8.5
         version: 2.8.6
+      db-migrate:
+        specifier: ^0.11.14
+        version: 0.11.14
+      db-migrate-pg:
+        specifier: ^1.5.2
+        version: 1.5.2
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -120,12 +126,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.0.5
         version: 3.2.4(vitest@3.2.4(@types/node@22.19.13)(jiti@2.6.1)(jsdom@28.1.0(@noble/hashes@1.8.0))(lightningcss@1.31.1)(tsx@4.21.0))
-      db-migrate:
-        specifier: ^0.11.14
-        version: 0.11.14
-      db-migrate-pg:
-        specifier: ^1.5.2
-        version: 1.5.2
       eslint:
         specifier: ^9.19.0
         version: 9.39.3(jiti@2.6.1)
