@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/worker/package.json ./packages/worker/package.json
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 
 COPY packages/worker ./packages/worker
 RUN pnpm --filter @collab/worker build
