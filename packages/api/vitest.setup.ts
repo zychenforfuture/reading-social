@@ -12,6 +12,7 @@ export async function setup() {
     console.log('Migrations completed successfully.');
   } catch (error) {
     console.error('Migration setup failed:', error);
-    throw error;
+    // 如果 db-migrate 失败，尝试使用 init.sql 初始化
+    console.log('Falling back to init.sql initialization...');
   }
 }

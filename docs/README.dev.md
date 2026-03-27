@@ -21,8 +21,8 @@
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | Web | ✅ 已完成 | 登录注册、阅读、评论回复点赞、目录、阅读设置、通知中心 |
-| API | ✅ 已完成 | JWT、OTP、评论、通知、Swagger |
-| Worker | ⚠️ 部分完成 | 分块、SimHash 已完成；Embedding 后端链路已完成，Qdrant 未集成 |
+| API | ✅ 已完成 | JWT、OTP、评论、通知、Swagger、Qdrant 向量集成 |
+| Worker | ✅ 已完成 | 分块、SimHash、Embedding 向量、Qdrant 入库 |
 | Mobile | ⚠️ 部分完成 | 主流程可用，通知中心与阅读设置待补齐 |
 | 跨文档评论产品化 | ⚠️ 部分完成 | 后端有重映射能力，前端聚合视图未完成 |
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
+import { qdrantClient, COLLECTION_NAME } from '../config/qdrant.js';
 
 const router: Router = Router();
 
@@ -55,10 +56,11 @@ router.get('/:hash/comments', async (req, res) => {
   }
 });
 
-// 获取相似内容块
+// 获取相似内容块（支持向量搜索）
 router.get('/:hash/similar', async (req, res) => {
   try {
     const { hash } = req.params;
+    const { useVector } = req.query;
 
     if (!SHA256_HASH_REGEX.test(hash)) {
       return res.status(400).json({ error: 'Invalid hash format' });
@@ -73,6 +75,44 @@ router.get('/:hash/similar', async (req, res) => {
       return res.status(404).json({ error: 'Content block not found' });
     }
 
+    // 如果使用向量搜索（?useVector=true）
+    if (useVector === 'true') {
+      // 从 Qdrant 获取该块的 embedding
+      const uuidHash = hash.slice(0, 8) + '-' + hash.slice(8, 12) + '-' + hash.slice(12, 16) + '-' + hash.slice(16, 20) + '-' + hash.slice(20, 32);
+
+      try {
+        const pointData = await qdrantClient.retrieve(COLLECTION_NAME, {
+          ids: [uuidHash],
+          with_vector: true,
+        });
+
+        if (pointData.length > 0 && pointData[0].vector) {
+          // 使用获取的向量进行相似搜索
+          const similarResults = await qdrantClient.search(COLLECTION_NAME, {
+            vector: pointData[0].vector as number[],
+            limit: 20,
+            score_threshold: 0.5,
+            with_payload: true,
+          });
+
+          // 过滤掉自身
+          const filteredResults = similarResults
+            .filter(r => (r.payload as any).block_hash !== hash)
+            .map(r => ({
+              block_hash: (r.payload as any).block_hash,
+              similarity_score: r.score,
+              algorithm: 'embedding',
+            }));
+
+          return res.json({ similar: filteredResults, source: 'vector' });
+        }
+      } catch (vectorError) {
+        logger.warn('Vector search failed, falling back to database:', vectorError);
+        // 向量搜索失败，回退到数据库查询
+      }
+    }
+
+    // 默认从数据库查询（SimHash 结果）
     const result = await pool.query(
       `SELECT sb.similar_hash, sb.similarity_score, sb.algorithm,
               cb.raw_content, cb.word_count, cb.occurrence_count
@@ -84,7 +124,7 @@ router.get('/:hash/similar', async (req, res) => {
       [hash]
     );
 
-    res.json({ similar: result.rows });
+    res.json({ similar: result.rows, source: 'database' });
   } catch (error) {
     logger.error('Get similar blocks error:', error);
     res.status(500).json({ error: 'Internal server error' });
