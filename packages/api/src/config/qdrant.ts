@@ -11,7 +11,7 @@ export const VECTOR_SIZE = 384; // all-MiniLM-L6-v2 输出 384 维向量
  * 将 block_hash（64 位 SHA-256 hex）转换为 UUID 格式
  * Qdrant point ID 只接受无符号整数或 UUID，取前 32 位重新格式化
  */
-function blockHashToUUID(blockHash: string): string {
+export function blockHashToUUID(blockHash: string): string {
   const h = blockHash.slice(0, 32);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
@@ -113,4 +113,39 @@ export async function findSimilarEmbeddings(
     logger.error('Failed to search similar embeddings:', error);
     throw error;
   }
+}
+
+/**
+ * 根据 block hash 获取存储的向量
+ */
+export async function getEmbeddingVector(blockHash: string): Promise<number[] | null> {
+  try {
+    const pointData = await qdrantClient.retrieve(COLLECTION_NAME, {
+      ids: [blockHashToUUID(blockHash)],
+      with_vector: true,
+    });
+
+    if (pointData.length > 0 && pointData[0].vector) {
+      return pointData[0].vector as number[];
+    }
+    return null;
+  } catch (error) {
+    logger.error(`Failed to get embedding vector for block ${blockHash}:`, error);
+    return null;
+  }
+}
+
+/**
+ * 根据 block hash 查找相似的块（通过 Qdrant 向量搜索）
+ */
+export async function findSimilarBlocksByHash(
+  blockHash: string,
+  limit: number = 20,
+  scoreThreshold: number = 0.5
+): Promise<Array<{ block_hash: string; score: number }>> {
+  const embedding = await getEmbeddingVector(blockHash);
+  if (!embedding) {
+    return [];
+  }
+  return findSimilarEmbeddings(embedding, limit, scoreThreshold);
 }

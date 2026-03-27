@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
-import { qdrantClient, COLLECTION_NAME } from '../config/qdrant.js';
+import { findSimilarBlocksByHash } from '../config/qdrant.js';
 
 const router: Router = Router();
 
@@ -77,34 +77,19 @@ router.get('/:hash/similar', async (req, res) => {
 
     // 如果使用向量搜索（?useVector=true）
     if (useVector === 'true') {
-      // 从 Qdrant 获取该块的 embedding
-      const uuidHash = hash.slice(0, 8) + '-' + hash.slice(8, 12) + '-' + hash.slice(12, 16) + '-' + hash.slice(16, 20) + '-' + hash.slice(20, 32);
-
       try {
-        const pointData = await qdrantClient.retrieve(COLLECTION_NAME, {
-          ids: [uuidHash],
-          with_vector: true,
-        });
+        // 使用集中封装的 Qdrant 辅助函数
+        const vectorResults = await findSimilarBlocksByHash(hash, 20, 0.5);
 
-        if (pointData.length > 0 && pointData[0].vector) {
-          // 使用获取的向量进行相似搜索
-          const similarResults = await qdrantClient.search(COLLECTION_NAME, {
-            vector: pointData[0].vector as number[],
-            limit: 20,
-            score_threshold: 0.5,
-            with_payload: true,
-          });
-
-          // 过滤掉自身
-          const filteredResults = similarResults
-            .filter(r => (r.payload as any).block_hash !== hash)
-            .map(r => ({
-              block_hash: (r.payload as any).block_hash,
+        if (vectorResults.length > 0) {
+          return res.json({
+            similar: vectorResults.map(r => ({
+              similar_hash: r.block_hash,
               similarity_score: r.score,
               algorithm: 'embedding',
-            }));
-
-          return res.json({ similar: filteredResults, source: 'vector' });
+            })),
+            source: 'vector',
+          });
         }
       } catch (vectorError) {
         logger.warn('Vector search failed, falling back to database:', vectorError);

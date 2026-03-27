@@ -61,8 +61,8 @@ describe('Boundary Tests - 边界测试', () => {
           code: '123456',
         });
 
-      // Zod 验证失败返回 400，或其他错误返回 500 都是合理的
-      expect([400, 500]).toContain(res.status);
+      // Zod 验证失败应返回 400
+      expect(res.status).toBe(400);
       expect(typeof res.body.error).toBe('string');
     });
 
@@ -78,8 +78,9 @@ describe('Boundary Tests - 边界测试', () => {
           code: '123456',
         });
 
-      // Zod schema 没有上限，所以可能成功或失败
-      expect([200, 201, 400, 500]).toContain(res.status);
+      // 期望输入验证失败并返回 400
+      expect(res.status).toBe(400);
+      expect(typeof res.body.error).toBe('string');
     });
 
     it('应该拒绝特殊字符用户名', async () => {
@@ -92,8 +93,8 @@ describe('Boundary Tests - 边界测试', () => {
           code: '123456',
         });
 
-      // 可能成功注册、验证失败或服务器错误
-      expect([201, 400, 500]).toContain(res.status);
+      // 对包含潜在 XSS 的用户名应进行验证并返回 400
+      expect(res.status).toBe(400);
     });
   });
 

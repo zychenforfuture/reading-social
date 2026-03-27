@@ -74,9 +74,9 @@ initAuth();
 
 // 注册请求验证 schema
 const registerSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().max(254),
   username: z.string().min(2).max(50),
-  password: z.string().min(6),
+  password: z.string().min(6).max(128),
   code: z.string().length(6),
 });
 
