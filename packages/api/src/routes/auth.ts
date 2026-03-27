@@ -75,7 +75,16 @@ initAuth();
 // 注册请求验证 schema
 const registerSchema = z.object({
   email: z.string().email().max(254),
-  username: z.string().min(2).max(50),
+  username: z
+    .string()
+    .min(2)
+    .max(50)
+    // Allows alphanumerics, underscores, and CJK Unified Ideographs (U+4E00–U+9FFF).
+    // Does not include CJK Extension A/B or other supplemental CJK blocks.
+    .regex(
+      /^[a-zA-Z0-9_\u4e00-\u9fff]+$/,
+      'Username can only contain letters, numbers, underscores, and Chinese characters',
+    ),
   password: z.string().min(6).max(128),
   code: z.string().length(6),
 });

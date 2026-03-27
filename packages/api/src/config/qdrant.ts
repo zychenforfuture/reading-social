@@ -65,8 +65,12 @@ export async function initializeQdrant(): Promise<void> {
           },
         });
         logger.info(`Qdrant collection "${COLLECTION_NAME}" quantization updated to int8`);
-      } catch {
-        logger.info(`Qdrant collection "${COLLECTION_NAME}" already exists`);
+      } catch (error) {
+        logger.warn(
+          `Failed to update quantization config for Qdrant collection "${COLLECTION_NAME}". ` +
+            'Collection will continue using its existing configuration.',
+          error,
+        );
       }
     }
   } catch (error) {
@@ -147,5 +151,6 @@ export async function findSimilarBlocksByHash(
   if (!embedding) {
     return [];
   }
-  return findSimilarEmbeddings(embedding, limit, scoreThreshold);
+  const results = await findSimilarEmbeddings(embedding, limit, scoreThreshold);
+  return results.filter(result => result.block_hash !== blockHash);
 }

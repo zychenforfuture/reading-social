@@ -3,10 +3,23 @@
  * 测试内容块查询、相似块推荐等功能
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import app from '../app.js';
 import { pool } from '../config/database.js';
+
+// 模拟 Qdrant 模块，避免测试依赖外部服务
+vi.mock('../config/qdrant.js', () => ({
+  findSimilarBlocksByHash: vi.fn().mockResolvedValue([]),
+  initializeQdrant: vi.fn(),
+  checkEmbeddingExists: vi.fn().mockResolvedValue(false),
+  blockHashToUUID: vi.fn((hash: string) => {
+    const h = hash.slice(0, 32);
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  }),
+}));
+
+import { findSimilarBlocksByHash } from '../config/qdrant.js';
 
 describe('Block API', () => {
   let testBlockHash: string;
@@ -95,6 +108,37 @@ describe('Block API', () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('similar');
       expect(Array.isArray(res.body.similar)).toBe(true);
+    });
+  });
+
+  describe('GET /api/blocks/:hash/similar?useVector=true', () => {
+    it('应该使用向量搜索并返回结果', async () => {
+      const mockResults = [{ block_hash: '1'.repeat(64), score: 0.95 }];
+      vi.mocked(findSimilarBlocksByHash).mockResolvedValueOnce(mockResults);
+
+      const res = await request(app).get(`/api/blocks/${testBlockHash}/similar?useVector=true`);
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('vector');
+      expect(Array.isArray(res.body.similar)).toBe(true);
+      expect(res.body.similar[0]).toHaveProperty('similar_hash', '1'.repeat(64));
+      expect(res.body.similar[0]).toHaveProperty('similarity_score', 0.95);
+      expect(res.body.similar[0]).toHaveProperty('algorithm', 'embedding');
+    });
+
+    it('应该在向量搜索无结果时回退到数据库', async () => {
+      vi.mocked(findSimilarBlocksByHash).mockResolvedValueOnce([]);
+
+      const res = await request(app).get(`/api/blocks/${testBlockHash}/similar?useVector=true`);
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('database');
+    });
+
+    it('应该在向量搜索失败时回退到数据库', async () => {
+      vi.mocked(findSimilarBlocksByHash).mockRejectedValueOnce(new Error('Qdrant unavailable'));
+
+      const res = await request(app).get(`/api/blocks/${testBlockHash}/similar?useVector=true`);
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('database');
     });
   });
 });

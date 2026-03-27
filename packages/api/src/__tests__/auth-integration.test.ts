@@ -32,47 +32,53 @@ describe('Auth Integration Tests', () => {
   });
 
   describe('完整注册流程', () => {
+    const FIRST_OTP = '123456';
+    const SECOND_OTP = '654321';
+
+    beforeAll(async () => {
+      // 清理可能存在的残留数据，并插入有效验证码
+      await pool.query('DELETE FROM users WHERE email = $1', [TEST_EMAIL]);
+      await pool.query('DELETE FROM email_otps WHERE email = $1', [TEST_EMAIL]);
+      await pool.query(
+        `INSERT INTO email_otps (email, code, purpose, expires_at)
+         VALUES ($1, $2, 'register', NOW() + INTERVAL '10 minutes')`,
+        [TEST_EMAIL, FIRST_OTP],
+      );
+    });
+
     it('应该完成注册全流程', async () => {
-      // 步骤 1: 发送验证码
-      const sendCodeRes = await request(app)
-        .post('/api/auth/send-code')
-        .send({ email: TEST_EMAIL, purpose: 'register' });
-
-      expect([200, 400, 500]).toContain(sendCodeRes.status);
-
-      // 步骤 2: 注册账号（使用测试验证码）
       const registerRes = await request(app)
         .post('/api/auth/register')
         .send({
           email: TEST_EMAIL,
           username: TEST_USERNAME,
           password: TEST_PASSWORD,
-          code: '123456', // 测试环境可能跳过验证
+          code: FIRST_OTP,
         });
 
-      // 可能成功或因验证码失败
-      if (registerRes.status === 201) {
-        expect(registerRes.body.message).toContain('注册成功');
-      } else if (registerRes.status === 400) {
-        expect(registerRes.body.error).toContain('验证码');
-      }
+      expect(registerRes.status).toBe(201);
+      expect(registerRes.body.message).toContain('注册成功');
     });
 
     it('应该拒绝重复注册', async () => {
+      // 旧验证码已被消费，插入新的
+      await pool.query(
+        `INSERT INTO email_otps (email, code, purpose, expires_at)
+         VALUES ($1, $2, 'register', NOW() + INTERVAL '10 minutes')`,
+        [TEST_EMAIL, SECOND_OTP],
+      );
+
       const registerRes = await request(app)
         .post('/api/auth/register')
         .send({
           email: TEST_EMAIL,
           username: TEST_USERNAME,
           password: TEST_PASSWORD,
-          code: '123456',
+          code: SECOND_OTP,
         });
 
-      // 已注册应该返回 400（验证码错误或已注册）
       expect(registerRes.status).toBe(400);
-      expect(['验证码', '已注册', 'Validation failed'].some(
-        msg => registerRes.body.error?.includes(msg)
-      )).toBe(true);
+      expect(registerRes.body.error).toBe('Email already registered');
     });
   });
 
