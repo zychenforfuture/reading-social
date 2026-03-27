@@ -1,8 +1,8 @@
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
-import { api, type ContentBlock, type Comment, type Document as DocEntry } from '../lib/utils';
+import { api, type ContentBlock, type Document as DocEntry } from '../lib/utils';
 import { useCommentSSE } from '../hooks/useCommentSSE';
 import CommentPanel from '../components/CommentPanel';
 import TableOfContents from '../components/TableOfContents';
@@ -16,7 +16,6 @@ import { buildChapters } from '../utils/chapterUtils';
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const queryClient = useQueryClient();
   const [selectedBlock, setSelectedBlock] = useState<{ hash: string; text: string } | null>(null);
   const [currentChapter, setCurrentChapter] = useState(0);
   const [showTOC, setShowTOC] = useState(false);

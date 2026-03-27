@@ -141,6 +141,42 @@ CREATE TABLE IF NOT EXISTS failed_embeddings (
 );
 CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry ON failed_embeddings(created_at);
 
+-- 邮件 OTP 表 (用于注册/登录验证)
+CREATE TABLE IF NOT EXISTS email_otps (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    code VARCHAR(6) NOT NULL,
+    purpose VARCHAR(20) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);
+
+-- 通知表
+CREATE TABLE IF NOT EXISTS notifications (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type         VARCHAR(50)  NOT NULL,          -- reply | mention | like
+    title        VARCHAR(200) NOT NULL,
+    content      TEXT,
+    data         JSONB        NOT NULL DEFAULT '{}',
+    is_read      BOOLEAN      NOT NULL DEFAULT false,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user
+    ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread
+    ON notifications(user_id) WHERE is_read = false;
+
+-- 点赞计数表 (用于并发点赞控制)
+CREATE TABLE IF NOT EXISTS comment_likes (
+    comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (comment_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_comment_likes_comment ON comment_likes(comment_id);
+
 -- 更新时间的触发器函数
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -197,6 +233,6 @@ INSERT INTO users (email, username, password_hash) VALUES
 DO $$
 BEGIN
     RAISE NOTICE '数据库初始化完成！';
-    RAISE NOTICE '表：users, documents, content_blocks, document_blocks, comments, similar_blocks, document_embeddings';
+    RAISE NOTICE '表：users, documents, content_blocks, document_blocks, comments, similar_blocks, document_embeddings, failed_embeddings, email_otps, notifications, comment_likes';
     RAISE NOTICE '测试用户：admin@example.com / user@example.com';
 END $$;

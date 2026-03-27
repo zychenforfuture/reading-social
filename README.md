@@ -30,8 +30,8 @@
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | Web | ✅ 已完成 | 登录注册、阅读、评论回复点赞、目录、阅读设置、通知中心、管理员面板 |
-| API | ✅ 已完成 | JWT/OAuth、评论、通知、Swagger、管理员 API |
-| Worker | ⚠️ 部分完成 | 分块、SimHash 已完成；Embedding 后端链路已完成，Qdrant 未集成 |
+| API | ✅ 已完成 | JWT/OAuth、评论、通知、Swagger、管理员 API、Qdrant 向量集成 |
+| Worker | ✅ 已完成 | 分块、SimHash 已完成；Embedding 后端链路已完成，Qdrant 已集成 |
 | Mobile | ⚠️ 部分完成 | 主流程可用，通知中心与阅读设置未补齐 |
 | Admin 面板 | ✅ 已完成 | 系统概览、用户/文档/评论管理 |
 | 跨文档评论产品化 | ⚠️ 部分完成 | 后端支持重映射，前端聚合视图未完成 |
@@ -156,7 +156,6 @@ cp .env.production.example .env.production
 
 ### 进行中
 - [ ] PDF/EPUB 后端解析链路
-- [ ] Qdrant 向量集成
 - [ ] 跨文档评论前端聚合视图
 
 ### 规划中

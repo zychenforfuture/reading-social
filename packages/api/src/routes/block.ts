@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { logger } from '../config/logger.js';
+import { findSimilarBlocksByHash } from '../config/qdrant.js';
 
 const router: Router = Router();
 
@@ -55,10 +56,11 @@ router.get('/:hash/comments', async (req, res) => {
   }
 });
 
-// 获取相似内容块
+// 获取相似内容块（支持向量搜索）
 router.get('/:hash/similar', async (req, res) => {
   try {
     const { hash } = req.params;
+    const { useVector } = req.query;
 
     if (!SHA256_HASH_REGEX.test(hash)) {
       return res.status(400).json({ error: 'Invalid hash format' });
@@ -73,6 +75,29 @@ router.get('/:hash/similar', async (req, res) => {
       return res.status(404).json({ error: 'Content block not found' });
     }
 
+    // 如果使用向量搜索（?useVector=true）
+    if (useVector === 'true') {
+      try {
+        // 使用集中封装的 Qdrant 辅助函数
+        const vectorResults = await findSimilarBlocksByHash(hash, 20, 0.5);
+
+        if (vectorResults.length > 0) {
+          return res.json({
+            similar: vectorResults.map(r => ({
+              similar_hash: r.block_hash,
+              similarity_score: r.score,
+              algorithm: 'embedding',
+            })),
+            source: 'vector',
+          });
+        }
+      } catch (vectorError) {
+        logger.warn('Vector search failed, falling back to database:', vectorError);
+        // 向量搜索失败，回退到数据库查询
+      }
+    }
+
+    // 默认从数据库查询（SimHash 结果）
     const result = await pool.query(
       `SELECT sb.similar_hash, sb.similarity_score, sb.algorithm,
               cb.raw_content, cb.word_count, cb.occurrence_count
@@ -84,7 +109,7 @@ router.get('/:hash/similar', async (req, res) => {
       [hash]
     );
 
-    res.json({ similar: result.rows });
+    res.json({ similar: result.rows, source: 'database' });
   } catch (error) {
     logger.error('Get similar blocks error:', error);
     res.status(500).json({ error: 'Internal server error' });
