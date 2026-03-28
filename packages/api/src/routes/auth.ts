@@ -66,8 +66,8 @@ async function syncAdminEmails() {
     [adminEmails]
   );
 
-  logger.info(`Admin emails synced (${result.rowCount} granted): ${adminEmails.join(', ')}`);
-  return result.rowCount ?? 0;
+  logger.info(`Admin emails synced (${result?.rowCount ?? 0} granted): ${adminEmails.join(', ')}`);
+  return result?.rowCount ?? 0;
 }
 
 initAuth();

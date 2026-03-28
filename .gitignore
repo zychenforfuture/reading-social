@@ -1,22 +1,41 @@
-# 依赖
+# Dependencies
 node_modules/
 **/node_modules/
 .pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# 构建产物
+# Build Artifacts
 dist/
 **/dist/
 build/
+**/build/
+web-build/
+/ios
+/android
 
-# TypeScript 增量编译缓存
+# TypeScript & Compilers
+*.tsbuildinfo
+**/tsconfig.tsbuildinfo
+expo-env.d.ts
 *.tsbuildinfo
 
-# Vite 编译产物
-packages/web/vite.config.d.ts
+# Vite & Development Cache
+.vite/
+**/.cache/
+.expo/
+.kotlin/
+.metro-health-check*
 packages/web/vite.config.js
+packages/web/vite.config.d.ts
 
-# 环境变量（保留 .env.example 作为模板）
+# Environment Variables
 .env
+.env.*
+!.env.example
+!.env.production.example
 .env.local
 .env.production
 .env.development
@@ -24,28 +43,47 @@ packages/web/vite.config.js
 packages/api/.env
 packages/web/.env
 packages/worker/.env
+packages/mobile/.env
 
-# 日志
+# Logs
 *.log
 logs/
+**/logs/
 
-# 系统文件
+# System Files
 .DS_Store
 Thumbs.db
+*.pem
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
 
-# 编辑器
+# Editors & IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 .claude/
 
-# 测试覆盖率
+# Testing & Reports
 coverage/
+**/coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
 
-# 数据库 / 缓存持久化数据
+# Persistent Data & Volumes
 volumes/
+postgres-data/
+redis-data/
+qdrant-data/
 
-# 构建缓存 / 备份文件
-**/.cache/
+# Misc
+.gemini/
+GEMINI.md
+gha-creds-*.json
 *.bak
+*.orig.*

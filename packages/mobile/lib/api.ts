@@ -4,6 +4,13 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
+import type { User, Document, RawBlock, Block, DocumentDetail, Comment } from '@collab/types';
+
+export type { User, Document, RawBlock, Block, DocumentDetail, Comment };
+
+export interface CommentWithReplies extends Comment {
+  replies?: Comment[];
+}
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
 
@@ -244,73 +251,6 @@ export const comments = {
       method: 'POST',
     }),
 };
-
-// ==================== 类型定义 ====================
-
-export interface User {
-  id: string;        // 修复：UUID 字符串，不是 number
-  email: string;
-  username: string;
-  is_admin: boolean;
-  avatar_url?: string | null;
-}
-
-export interface Document {
-  id: string;
-  title: string;
-  word_count?: number;
-  block_count?: number;
-  status: 'processing' | 'ready' | 'error';
-  created_at: string;
-  updated_at?: string;
-  uploader?: string;  // 仅管理员可见
-}
-
-export interface RawBlock {
-  block_hash: string;
-  raw_content: string;
-  word_count?: number;
-  occurrence_count?: number;
-}
-
-export interface Block {
-  id: number;
-  hash: string;
-  type: 'heading' | 'paragraph' | string;
-  content: string;
-  order_index: number;
-  heading_level?: number;
-  word_count?: number;
-}
-
-export interface DocumentDetail extends Document {
-  blocks: Block[];
-}
-
-export interface Comment {
-  id: string;
-  block_hash: string;
-  user_id: string;
-  username?: string;
-  avatar_url?: string | null;
-  content: string;
-  selected_text?: string | null;
-  sentence_hash?: string | null;
-  is_resolved: boolean;
-  like_count: number;
-  liked_by_me?: boolean;
-  reply_count: number;
-  root_id?: string | null;
-  reply_to_user_id?: string | null;
-  reply_to_username?: string | null;
-  created_at: string;
-  updated_at: string;
-  is_deleted?: boolean;
-}
-
-export interface CommentWithReplies extends Comment {
-  replies?: Comment[];
-}
 
 // ==================== 工具函数 ====================
 

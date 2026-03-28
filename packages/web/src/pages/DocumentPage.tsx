@@ -4,6 +4,8 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
 import { api, type ContentBlock, type Document as DocEntry } from '../lib/utils';
 import { useCommentSSE } from '../hooks/useCommentSSE';
+import { useDocumentScroll } from '../hooks/useDocumentScroll';
+import { useChapterManager } from '../hooks/useChapterManager';
 import CommentPanel from '../components/CommentPanel';
 import TableOfContents from '../components/TableOfContents';
 import ReadingSettings, { loadSettings } from '../components/document/ReadingSettings';
@@ -12,12 +14,12 @@ import DocumentContent from '../components/document/DocumentContent';
 import DocumentFooter from '../components/document/DocumentFooter';
 import { BG_THEMES } from '../components/document/ReadingSettings';
 import { buildChapters } from '../utils/chapterUtils';
+import type { EditorRef } from '../components/Editor';
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedBlock, setSelectedBlock] = useState<{ hash: string; text: string } | null>(null);
-  const [currentChapter, setCurrentChapter] = useState(0);
   const [showTOC, setShowTOC] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [focusCommentIds, setFocusCommentIds] = useState<string[] | null>(null);
@@ -28,39 +30,7 @@ export default function DocumentPage() {
   const [bgKey, setBgKey] = useState(initSettings.bgKey);
   const bgTheme = BG_THEMES.find(t => t.key === bgKey) ?? BG_THEMES[0]!;
   const readingStyle = { fontSize, lineHeight, bgColor: bgTheme.bgColor, textColor: bgTheme.textColor };
-  // 记录文档切换时保存的章节索引，等章节列表建立后恢复
-  const savedChapterRef = useRef(0);
-  // 每篇文档只恢复一次，避免后续批量加载时反复跳转
-  const restoredRef = useRef(false);
-  // 刷新时恢复的滚动位置（null = 不恢复）
-  const pendingScrollRef = useRef<number | null>(null);
-
-  // 文档切换时读取上次阅读位置
-  useEffect(() => {
-    if (!id) return;
-    setCurrentChapter(0);
-    restoredRef.current = false;
-    try {
-      const saved = localStorage.getItem(`doc-chapter-${id}`);
-      savedChapterRef.current = saved ? parseInt(saved, 10) : 0;
-    } catch {
-      savedChapterRef.current = 0;
-    }
-  }, [id]);
-
-  // 滚动时实时保存位置（防抖 400ms）
-  useEffect(() => {
-    if (!id) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const onScroll = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        try { localStorage.setItem(`doc-scroll-${id}`, String(Math.round(window.scrollY))); } catch {}
-      }, 400);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => { window.removeEventListener('scroll', onScroll); if (timer) clearTimeout(timer); };
-  }, [id]);
+  const editorRef = useRef<EditorRef>(null);
 
   // 分批加载所有块
   const [allBlocks, setAllBlocks] = useState<ContentBlock[]>([]);
@@ -85,12 +55,21 @@ export default function DocumentPage() {
         if (cancelled) return;
         const res = await api.getDocument(id, offset, BATCH);
         if (cancelled) return;
-        if (firstBatch) { setDocMeta(res.document); firstBatch = false; }
-        // 累积到 ref，不触发重渲染
-        allBlocksRef.current = allBlocksRef.current.concat(res.content);
-        // 每批完成时更新一次状态
-        setAllBlocks([...allBlocksRef.current]);
-        if (!res.pagination.hasMore) break;
+        if (firstBatch) { 
+          setDocMeta(res.document);
+          allBlocksRef.current = allBlocksRef.current.concat(res.content);
+          setAllBlocks([...allBlocksRef.current]);
+          firstBatch = false; 
+        } else {
+          allBlocksRef.current = allBlocksRef.current.concat(res.content);
+        }
+        
+        if (!res.pagination.hasMore) {
+          if (!firstBatch) { // only need to update again if we fetched more than one batch
+            setAllBlocks([...allBlocksRef.current]);
+          }
+          break;
+        }
         offset += BATCH;
       }
       setLoadingBlocks(false);
@@ -125,6 +104,9 @@ export default function DocumentPage() {
     [allBlocks, blockCommentCount],
   );
 
+  const pendingScrollRef = useDocumentScroll(id);
+  const { currentChapter, setCurrentChapter, goToChapter } = useChapterManager(id, chapters, pendingScrollRef);
+
   // 从通知跳转：URL 中带有 ?block=xxx 时，自动定位到对应段落并打开评论
   const pendingBlockRef = useRef<string | null>(searchParams.get('block'));
   useEffect(() => {
@@ -145,56 +127,23 @@ export default function DocumentPage() {
     setShowComments(true);
     // 切换章节后等 DOM 刷新再滚动
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-block-hash="${blockHash}"]`) as HTMLElement | null;
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      editorRef.current?.scrollToBlock(blockHash);
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allBlocks.length, chapters.length, id]);
-
-  // 章节列表首次建立（或文档切换后重建）时，恢复上次阅读位置
-  useEffect(() => {
-    if (chapters.length === 0) { restoredRef.current = false; return; }
-    if (restoredRef.current) return;
-    restoredRef.current = true;
-    const target = Math.max(0, Math.min(chapters.length - 1, savedChapterRef.current));
-    if (target > 0) setCurrentChapter(target);
-    // 读取上次滚动位置，等内容渲染后恢复
-    try {
-      const savedY = localStorage.getItem(`doc-scroll-${id}`);
-      const y = savedY ? parseInt(savedY, 10) : 0;
-      if (target > 0) {
-        // chapter 会变化，由 useEffect([currentChapter]) 负责滚动
-        pendingScrollRef.current = y;
-      } else {
-        // chapter 不变（已是 0），直接用 rAF 恢复
-        requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: y })));
-      }
-    } catch {}
-  }, [chapters.length, id]);
 
   const chapter = chapters[currentChapter];
   const chapterBlocks = chapter
     ? allBlocks.slice(chapter.blockStart, chapter.blockStart + chapter.blockCount)
     : allBlocks;
 
-  // 章节内容切换后恢复滚动位置（刷新时）或回顶（手动翻章节时）
-  useEffect(() => {
-    if (pendingScrollRef.current === null) return;
-    const y = pendingScrollRef.current;
-    pendingScrollRef.current = null;
-    // 双 rAF 确保 DOM 已完整渲染再滚动
-    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: y })));
-  }, [currentChapter]);
-
   const goTo = (idx: number) => {
-    const target = Math.max(0, Math.min(chapters.length - 1, idx));
-    setCurrentChapter(target);
-    setSelectedBlock(null);
-    setShowComments(false);
-    // 翻章节时清零滚动记录，确保到新章节顶部
-    try { if (id) localStorage.removeItem(`doc-scroll-${id}`); } catch {}
-    pendingScrollRef.current = 0; // 让 useEffect 滚到顶
-    try { if (id) localStorage.setItem(`doc-chapter-${id}`, String(target)); } catch {}
+    goToChapter(idx, {
+      onGoTo: () => {
+        setSelectedBlock(null);
+        setShowComments(false);
+      }
+    });
   };
 
   const allComments = commentsData?.comments ?? [];
@@ -244,6 +193,7 @@ export default function DocumentPage() {
         />
 
         <DocumentContent
+          ref={editorRef}
           chapterBlocks={chapterBlocks}
           blockCommentCount={blockCommentCount}
           comments={commentsData?.comments ?? []}
@@ -262,6 +212,7 @@ export default function DocumentPage() {
             setShowComments(true);
           }}
           onGoToChapter={goTo}
+          onShowTOC={() => setShowTOC(true)}
         />
 
         <DocumentFooter

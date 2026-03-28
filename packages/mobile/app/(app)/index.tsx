@@ -13,6 +13,7 @@ import {
 import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { documents } from '../../lib/api';
 import { useAuthStore } from '../../lib/store';
 import type { Document } from '../../lib/api';
@@ -31,21 +32,19 @@ export default function DocumentListPage() {
   const handleUpload = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'text/plain', 'application/epub+zip', 'text/html'],
+        type: ['text/plain'], // Mobile uploads are restricted to plain text because the backend API expects raw text content.
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
 
       const file = result.assets[0];
-      const formData = new FormData();
-      formData.append('file', {
-        uri: file.uri,
-        name: file.name,
-        type: file.mimeType || 'application/octet-stream',
-      } as any);
-
+      
       setUploading(true);
-      await documents.upload(formData);
+      const content = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: 'utf8',
+      });
+
+      await documents.upload(file.name, content);
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       Alert.alert('上传成功', '文档已上传并正在处理');
     } catch (e: any) {
@@ -78,7 +77,7 @@ export default function DocumentListPage() {
     >
       <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
       <Text style={styles.cardMeta}>
-        {item.author || '未知作者'} · {new Date(item.created_at).toLocaleDateString('zh-CN')}
+        {item.uploader || '未知作者'} · {new Date(item.created_at).toLocaleDateString('zh-CN')}
       </Text>
       {item.block_count != null && (
         <Text style={styles.cardBlocks}>{item.block_count} 个段落</Text>

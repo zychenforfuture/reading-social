@@ -9,7 +9,9 @@
     "build:api": "pnpm --filter @collab/api build",
     "build:web": "pnpm --filter @collab/web build",
     "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r exec tsc --noEmit",
     "test": "./scripts/test.sh",
+    "test:all": "pnpm -r test",
     "test:quick": "pnpm --filter @collab/api test",
     "test:watch": "pnpm --filter @collab/api test:watch"
   },

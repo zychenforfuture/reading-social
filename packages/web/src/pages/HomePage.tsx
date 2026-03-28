@@ -127,7 +127,7 @@ export default function HomePage() {
 
   if (!isAuthenticated) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
+      <div className="flex flex-col items-center justify-center py-20 text-center">
         <h1 className="text-4xl font-bold mb-4">欢迎使用 共鸣阅读</h1>
         <p className="text-muted-foreground mb-8 text-center max-w-md">
           一个人读书是独奏，一群人读书是合唱。哪怕你们读的不是同一本书，只要内容相同，思想就能相遇。

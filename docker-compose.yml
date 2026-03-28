@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL - 元数据数据库
   postgres:
