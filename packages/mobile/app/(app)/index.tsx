@@ -13,6 +13,7 @@ import {
 import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { documents } from '../../lib/api';
 import { useAuthStore } from '../../lib/store';
 import type { Document } from '../../lib/api';
@@ -31,7 +32,7 @@ export default function DocumentListPage() {
   const handleUpload = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/plain'], // Backend seems to only expect text/plain effectively since it's just raw text. Wait, web only allows .txt
+        type: ['text/plain'], // Mobile uploads are restricted to plain text because the backend API expects raw text content.
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
@@ -39,8 +40,9 @@ export default function DocumentListPage() {
       const file = result.assets[0];
       
       setUploading(true);
-      const response = await fetch(file.uri);
-      const content = await response.text();
+      const content = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: 'utf8',
+      });
 
       await documents.upload(file.name, content);
       queryClient.invalidateQueries({ queryKey: ['documents'] });

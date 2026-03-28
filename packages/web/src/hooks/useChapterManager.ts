@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
+import type { MutableRefObject } from 'react';
 import type { Chapter } from '../components/TableOfContents';
 
-export function useChapterManager(id: string | undefined, chapters: Chapter[], pendingScrollRef: React.MutableRefObject<number | null>) {
+export function useChapterManager(id: string | undefined, chapters: Chapter[], pendingScrollRef: MutableRefObject<number | null>) {
   const [currentChapter, setCurrentChapter] = useState(0);
   const savedChapterRef = useRef(0);
   const restoredRef = useRef(false);

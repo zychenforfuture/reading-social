@@ -1,4 +1,4 @@
-import { useRef, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useMemo, useState, useLayoutEffect, forwardRef, useImperativeHandle, type CSSProperties } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { type ContentBlock, type Comment } from '../lib/utils';
 
@@ -35,11 +35,30 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useLayoutEffect(() => {
+    const updateScrollMargin = () => {
+      setScrollMargin(containerRef.current?.offsetTop ?? 0);
+    };
+    updateScrollMargin();
+    window.addEventListener('resize', updateScrollMargin);
+    return () => window.removeEventListener('resize', updateScrollMargin);
+  }, []);
+
+  const commentsByBlockHash = useMemo(() => {
+    const grouped: Record<string, Comment[]> = {};
+    for (const comment of comments) {
+      (grouped[comment.block_hash] ??= []).push(comment);
+    }
+    return grouped;
+  }, [comments]);
 
   const virtualizer = useWindowVirtualizer({
     count: content.length,
     estimateSize: () => 100,
     overscan: 10,
+    scrollMargin,
   });
 
   useImperativeHandle(ref, () => ({
@@ -64,11 +83,11 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
         '--reading-bg': bgColor,
         '--reading-color': textColor,
         '--reading-font-size': `${fontSize}px`,
-        '--reading-line-height': lineHeight,
+        '--reading-line-height': `${lineHeight}`,
         backgroundColor: 'var(--reading-bg)',
         color: 'var(--reading-color)',
         fontFamily: '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", "Source Han Sans CN", sans-serif',
-      } as React.CSSProperties}
+      } as CSSProperties}
     >
       {/* 顶部提示 */}
       <div className="flex justify-end px-8 pt-5 pb-0">
@@ -91,7 +110,7 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
             const blockIdx = virtualItem.index;
             const block = content[blockIdx];
             const totalCount = blockCommentCount[block.block_hash] ?? 0;
-            const blockComments = comments.filter(c => c.block_hash === block.block_hash);
+            const blockComments = commentsByBlockHash[block.block_hash] ?? [];
             const lines = block.raw_content.split('\n').filter((l: string) => l.trim() !== '' || block.raw_content.trim() === '');
 
             return (
@@ -104,7 +123,7 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
                   top: 0,
                   left: 0,
                   width: '100%',
-                  transform: `translateY(${virtualItem.start}px)`,
+                  transform: `translateY(${virtualItem.start - scrollMargin}px)`,
                 }}
               >
                 {(() => {

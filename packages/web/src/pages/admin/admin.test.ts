@@ -3,20 +3,25 @@ import { render } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
     },
-  },
-});
+  });
 
-const wrapper = ({ children }: { children: React.ReactNode }) => (
-  React.createElement(QueryClientProvider, { client: queryClient }, children)
-);
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    React.createElement(QueryClientProvider, { client: queryClient }, children)
+  );
+
+  return { wrapper };
+}
 
 describe('Admin - AdminDashboard', () => {
   it('should render AdminDashboard', async () => {
+    const { wrapper } = createWrapper();
     const module = await import('./AdminDashboard.js');
     const AdminDashboard = module.default;
     const { container } = render(React.createElement(AdminDashboard), { wrapper });
@@ -26,6 +31,7 @@ describe('Admin - AdminDashboard', () => {
 
 describe('Admin - AdminUsers', () => {
   it('should render AdminUsers', async () => {
+    const { wrapper } = createWrapper();
     const module = await import('./AdminUsers.js');
     const AdminUsers = module.default;
     const { container } = render(React.createElement(AdminUsers), { wrapper });
@@ -35,6 +41,7 @@ describe('Admin - AdminUsers', () => {
 
 describe('Admin - AdminDocuments', () => {
   it('should render AdminDocuments', async () => {
+    const { wrapper } = createWrapper();
     const module = await import('./AdminDocuments.js');
     const AdminDocuments = module.default;
     const { container } = render(React.createElement(AdminDocuments), { wrapper });
@@ -44,6 +51,7 @@ describe('Admin - AdminDocuments', () => {
 
 describe('Admin - AdminComments', () => {
   it('should render AdminComments', async () => {
+    const { wrapper } = createWrapper();
     const module = await import('./AdminComments.js');
     const AdminComments = module.default;
     const { container } = render(React.createElement(AdminComments), { wrapper });
