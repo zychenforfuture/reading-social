@@ -26,6 +26,7 @@ export type ContentBlock = {
   raw_content: string;
   word_count: number;
   occurrence_count?: number;
+  type?: string;
 };
 
 export type Comment = {

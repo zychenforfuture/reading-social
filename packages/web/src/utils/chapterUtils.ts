@@ -8,9 +8,6 @@ export interface Chapter {
   commentCount: number;
 }
 
-// 章节标题检测正则
-const CHAPTER_RE = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+)/i;
-
 /** 从 blocks 中提取章节结构 */
 export function buildChapters(blocks: ContentBlock[], blockCommentCount: Record<string, number>): Chapter[] {
   if (blocks.length === 0) return [];
@@ -18,8 +15,16 @@ export function buildChapters(blocks: ContentBlock[], blockCommentCount: Record<
   // 找到所有章节标题块的索引
   const headingIndexes: number[] = [];
   blocks.forEach((b, i) => {
-    const firstLine = b.raw_content.split('\n')[0]?.trim() ?? '';
-    if (CHAPTER_RE.test(firstLine)) headingIndexes.push(i);
+    // 兼容旧数据或无 type 字段情况，如果有 type 字段则优先使用
+    if (b.type === 'heading') {
+      headingIndexes.push(i);
+    } else if (!b.type) {
+      // 兼容回退逻辑，如果全量数据未包含 type，仍做基本正则判断（或直接忽略，这里保留简单正则以防万一）
+      const firstLine = b.raw_content.split('\n')[0]?.trim() ?? '';
+      if (/^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+)/i.test(firstLine)) {
+        headingIndexes.push(i);
+      }
+    }
   });
 
   // 如果检测到至少 1 个章节标题，按标题切分

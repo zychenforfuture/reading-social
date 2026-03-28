@@ -96,6 +96,13 @@ router.get('/:id', async (req, res) => {
       [effectiveId, limit, offset]
     );
 
+    const CHAPTER_RE = /^(第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷回篇部]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|卷[零一二三四五六七八九十百千\d]+|序章|终章|后记|前言|楔子|尾声)/i;
+
+    const contentWithTypes = blocksResult.rows.map((row: any) => ({
+      ...row,
+      type: CHAPTER_RE.test((row.raw_content || '').split('\n')[0]?.trim() ?? '') ? 'heading' : 'paragraph'
+    }));
+
     res.json({
       document: {
         id: doc.id,
@@ -106,7 +113,7 @@ router.get('/:id', async (req, res) => {
         created_at: doc.created_at,
         updated_at: doc.updated_at,
       },
-      content: blocksResult.rows,
+      content: contentWithTypes,
       pagination: {
         offset,
         limit,
