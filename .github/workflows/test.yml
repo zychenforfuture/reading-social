@@ -119,6 +119,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
 
+      - name: Generate JWT Secret
+        run: echo "JWT_SECRET=$(openssl rand -hex 32)" >> $GITHUB_ENV
+
       - name: Run API tests
         run: pnpm --filter @collab/api test -- --coverage
         env:
@@ -126,7 +129,6 @@ jobs:
           DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
           REDIS_URL: redis://127.0.0.1:6380
           QDRANT_URL: http://127.0.0.1:6334
-          JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
           ADMIN_INIT_EMAIL: test@example.com
           ADMIN_INIT_USERNAME: TestUser
           ADMIN_INIT_PASSWORD: test123
@@ -257,6 +259,9 @@ jobs:
       - name: Install Playwright Browsers
         run: pnpm --filter @collab/web exec playwright install --with-deps
 
+      - name: Generate JWT Secret
+        run: echo "JWT_SECRET=$(openssl rand -hex 32)" >> $GITHUB_ENV
+
       - name: Run Playwright E2E tests
         run: pnpm --filter @collab/web run test:e2e
         env:
@@ -265,7 +270,6 @@ jobs:
           DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
           REDIS_URL: redis://127.0.0.1:6380
           QDRANT_URL: http://127.0.0.1:6334
-          JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
           ADMIN_INIT_EMAIL: test@example.com
           ADMIN_INIT_USERNAME: TestUser
           ADMIN_INIT_PASSWORD: test123
