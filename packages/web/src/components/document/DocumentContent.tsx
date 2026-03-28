@@ -1,6 +1,7 @@
+import { forwardRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ContentBlock, Comment } from '../../lib/utils';
-import Editor, { type ReadingStyle } from '../Editor';
+import Editor, { type ReadingStyle, type EditorRef } from '../Editor';
 import ChapterComments from './ChapterComments';
 import type { Chapter } from '../TableOfContents';
 
@@ -17,7 +18,7 @@ interface DocumentContentProps {
   onGoToChapter: (idx: number) => void;
 }
 
-export default function DocumentContent({
+export default forwardRef<EditorRef, DocumentContentProps>(function DocumentContent({
   chapterBlocks,
   blockCommentCount,
   comments,
@@ -28,7 +29,7 @@ export default function DocumentContent({
   onSelectBlock,
   onClickCommentBubble,
   onGoToChapter,
-}: DocumentContentProps) {
+}, ref) {
   const chapter = chapters[currentChapter];
 
   return (
@@ -68,6 +69,7 @@ export default function DocumentContent({
 
       {/* 正文 */}
       <Editor
+        ref={ref}
         content={chapterBlocks}
         blockCommentCount={blockCommentCount}
         comments={comments}
@@ -85,4 +87,4 @@ export default function DocumentContent({
       />
     </>
   );
-}
+});
