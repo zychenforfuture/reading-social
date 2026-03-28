@@ -274,6 +274,7 @@ jobs:
           ADMIN_INIT_USERNAME: TestUser
           ADMIN_INIT_PASSWORD: test123
           VITE_API_URL: http://localhost:3000
+          FRONTEND_URL: http://localhost:4173
 
       - name: Upload Playwright reports
         if: always()
