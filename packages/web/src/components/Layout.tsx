@@ -18,7 +18,7 @@ export default function Layout() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center">
+        <div className="container mx-auto flex h-14 items-center">
           <div className="mr-4 flex">
             <Link to="/" className="mr-6 flex items-center space-x-2">
               <FileText className="h-6 w-6" />
@@ -89,7 +89,7 @@ export default function Layout() {
       {/* Mobile Menu */}
       {mobileMenuOpen && (
         <div className="md:hidden border-b bg-background">
-          <nav className="container py-4 space-y-4">
+          <nav className="container mx-auto py-4 space-y-4">
             <Link to="/" className="block text-sm font-medium">
               文档列表
             </Link>
@@ -111,7 +111,7 @@ export default function Layout() {
       )}
 
       {/* Main Content */}
-      <main className="container py-6">
+      <main className="container mx-auto py-6">
         <Outlet />
       </main>
     </div>

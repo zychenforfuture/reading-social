@@ -212,6 +212,7 @@ export default function DocumentPage() {
             setShowComments(true);
           }}
           onGoToChapter={goTo}
+          onShowTOC={() => setShowTOC(true)}
         />
 
         <DocumentFooter

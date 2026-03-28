@@ -14,8 +14,9 @@ interface DocumentContentProps {
   currentChapter: number;
   loadingBlocks: boolean;
   onSelectBlock: (hash: string, text: string) => void;
-  onClickCommentBubble: (ids: string[], block: { hash: string; text: string }) => void;
+  onClickCommentBubble: (commentIds: string[], block: { hash: string; text: string }) => void;
   onGoToChapter: (idx: number) => void;
+  onShowTOC: () => void;
 }
 
 export default forwardRef<EditorRef, DocumentContentProps>(function DocumentContent({
@@ -29,6 +30,7 @@ export default forwardRef<EditorRef, DocumentContentProps>(function DocumentCont
   onSelectBlock,
   onClickCommentBubble,
   onGoToChapter,
+  onShowTOC,
 }, ref) {
   const chapter = chapters[currentChapter];
 
@@ -47,7 +49,7 @@ export default forwardRef<EditorRef, DocumentContentProps>(function DocumentCont
           </button>
 
           <button
-            onClick={() => onGoToChapter(currentChapter + 1)}
+            onClick={onShowTOC}
             className="flex-1 text-center font-medium text-foreground px-4 hover:text-primary transition-colors truncate"
           >
             {chapter?.title ?? ''}
