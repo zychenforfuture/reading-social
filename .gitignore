@@ -40,8 +40,11 @@ Thumbs.db
 *.swo
 .claude/
 
-# 测试覆盖率
+# 测试覆盖率及产生的测试报告
 coverage/
+playwright-report/
+test-results/
+blob-report/
 
 # 数据库 / 缓存持久化数据
 volumes/
@@ -49,3 +52,6 @@ volumes/
 # 构建缓存 / 备份文件
 **/.cache/
 *.bak
+
+.gemini/
+gha-creds-*.json
