@@ -5,26 +5,36 @@ test.describe('Comment System', () => {
     await page.goto('/login');
     await page.getByPlaceholder('邮箱').fill(process.env.TEST_EMAIL || 'test@example.com');
     await page.getByPlaceholder('密码').fill(process.env.TEST_PASSWORD || 'test123');
-    await page.getByRole('button', { name: '登录' }).click();
+    await page.getByRole('button', { name: /登入/ }).click();
     await page.waitForURL('/');
+    
+    // 从文档列表点击第一个文档进入阅读页
+    await page.getByRole('button', { name: '打开' }).first().click();
+    
+    // 等待文档内容加载出来 (寻找正文段落)
+    await page.waitForSelector('.break-words.cursor-pointer');
   });
 
   test('should display comment section', async ({ page }) => {
-    await expect(page.getByText('评论')).toBeVisible();
+    await expect(page.getByRole('button', { name: '评论', exact: true })).toBeVisible();
   });
 
   test('should allow creating a comment', async ({ page }) => {
     const commentContent = `Test comment ${Date.now()}`;
 
-    await page.getByPlaceholder('添加评论...').fill(commentContent);
-    await page.getByRole('button', { name: '发送' }).click();
+    // Click on a readable text block to enable comment form
+    await page.locator('.break-words.cursor-pointer').first().click();
+
+    await page.locator('textarea').fill(commentContent);
+    await page.locator('textarea + button').click();
 
     await expect(page.getByText(commentContent)).toBeVisible({ timeout: 10000 });
   });
 
   test('should validate empty comment', async ({ page }) => {
-    await page.getByRole('button', { name: '发送' }).click();
-
-    await expect(page.getByPlaceholder('添加评论...')).toHaveAttribute('aria-invalid', 'true');
+    await page.locator('.break-words.cursor-pointer').first().click();
+    
+    // The button shouldn't be actionable when empty, it's disabled
+    await expect(page.locator('textarea + button')).toBeDisabled();
   });
 });
