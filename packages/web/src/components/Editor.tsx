@@ -92,7 +92,7 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
             const block = content[blockIdx];
             const totalCount = blockCommentCount[block.block_hash] ?? 0;
             const blockComments = comments.filter(c => c.block_hash === block.block_hash);
-            const lines = block.raw_content.split('\n').filter(l => l.trim() !== '' || block.raw_content.trim() === '');
+            const lines = block.raw_content.split('\n').filter((l: string) => l.trim() !== '' || block.raw_content.trim() === '');
 
             return (
               <div
@@ -118,7 +118,7 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
                     let placed = false;
                     if (c.selected_text) {
                       const probe = c.selected_text.trim().substring(0, 20);
-                      const idx = lines.findIndex(l => l.includes(probe));
+                      const idx = lines.findIndex((l: string) => l.includes(probe));
                       if (idx >= 0) { lineCommentIds[idx].push(c.id); placed = true; }
                     }
                     if (!placed) lineCommentIds[lines.length - 1].push(c.id);
@@ -181,7 +181,7 @@ export default forwardRef<EditorRef, EditorProps>(function Editor(
                         totalCount > 0 ? 'bg-amber-50/60 rounded-sm' : '',
                       ].join(' ')}
                     >
-                      {lines.map((line, lineIdx) => {
+                      {lines.map((line: string, lineIdx: number) => {
                         const trimmed = line.trim();
                         const isDialogue = trimmed.startsWith('\u201c') || trimmed.startsWith('\u2018') || trimmed.startsWith('"') || trimmed.startsWith('\u300c');
                         return (

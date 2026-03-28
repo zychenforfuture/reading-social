@@ -28,14 +28,18 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'pnpm dev',
+      command: process.env.CI ? 'pnpm --filter @collab/web preview' : 'pnpm dev',
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
     },
     {
-      command: 'pnpm --filter @collab/api dev',
+      command: process.env.CI
+        ? 'pnpm --filter @collab/api start'
+        : 'pnpm --filter @collab/api dev',
       url: 'http://localhost:3000/health',
       reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
     },
   ],
 });

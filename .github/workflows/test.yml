@@ -50,6 +50,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build types
+        run: pnpm --filter @collab/types build
+
       - name: Run typecheck
         run: pnpm run typecheck
 
@@ -257,6 +260,7 @@ jobs:
       - name: Run Playwright E2E tests
         run: pnpm --filter @collab/web run test:e2e
         env:
+          CI: true
           NODE_ENV: test
           DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
           REDIS_URL: redis://127.0.0.1:6380
@@ -265,6 +269,7 @@ jobs:
           ADMIN_INIT_EMAIL: test@example.com
           ADMIN_INIT_USERNAME: TestUser
           ADMIN_INIT_PASSWORD: test123
+          VITE_API_URL: http://localhost:3000
 
       - name: Upload Playwright reports
         if: always()
