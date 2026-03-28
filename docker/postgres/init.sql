@@ -224,15 +224,9 @@ CREATE TRIGGER trigger_update_occurrence_count
     AFTER INSERT OR DELETE ON document_blocks
     FOR EACH ROW EXECUTE FUNCTION update_occurrence_count();
 
--- 插入初始测试数据
-INSERT INTO users (email, username, password_hash) VALUES
-    ('admin@example.com', 'Admin', '$2b$10$dummy_hash_for_demo_purpose_only'),
-    ('user@example.com', 'User', '$2b$10$dummy_hash_for_demo_purpose_only');
-
 -- 打印完成信息
 DO $$
 BEGIN
     RAISE NOTICE '数据库初始化完成！';
     RAISE NOTICE '表：users, documents, content_blocks, document_blocks, comments, similar_blocks, document_embeddings, failed_embeddings, email_otps, notifications, comment_likes';
-    RAISE NOTICE '测试用户：admin@example.com / user@example.com';
 END $$;

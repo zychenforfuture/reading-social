@@ -124,6 +124,9 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6380
           QDRANT_URL: http://127.0.0.1:6334
           JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
+          ADMIN_INIT_EMAIL: test@example.com
+          ADMIN_INIT_USERNAME: TestUser
+          ADMIN_INIT_PASSWORD: test123
 
       - name: Upload coverage to Coveralls
         if: hashFiles('packages/api/coverage/lcov.info') != ''
@@ -259,6 +262,9 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6380
           QDRANT_URL: http://127.0.0.1:6334
           JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
+          ADMIN_INIT_EMAIL: test@example.com
+          ADMIN_INIT_USERNAME: TestUser
+          ADMIN_INIT_PASSWORD: test123
 
       - name: Upload Playwright reports
         if: always()

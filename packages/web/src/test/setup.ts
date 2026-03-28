@@ -4,6 +4,10 @@
  */
 
 import { vi, expect } from 'vitest';
+import * as matchers from '@testing-library/jest-dom/matchers';
+
+// 扩展 vitest matchers
+expect.extend(matchers);
 
 // 声明全局 vi（供测试文件使用，即使不导入也能使用）
 declare global {
