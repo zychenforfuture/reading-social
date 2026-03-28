@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   # PostgreSQL 测试数据库
   postgres-test:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: collab-postgres-test
     environment:
       POSTGRES_DB: collab_comments_test
