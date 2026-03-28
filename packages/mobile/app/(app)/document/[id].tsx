@@ -138,11 +138,12 @@ export default function DocumentPage() {
   }, [docId, offset, hasMore, loadingMore]);
 
   // ── 评论数据 ─────────────────────────────────────────────────────────────
-  const { data: blockCommentCount = {} } = useQuery<Record<string, number>>({
+  const { data: commentsData } = useQuery({
     queryKey: ['docCommentCount', docId],
-    queryFn: () => documents.getBlockCommentCounts(docId),
+    queryFn: () => documents.getComments(docId),
     enabled: !!docId,
   });
+  const blockCommentCount = commentsData?.blockCommentCount || {};
 
   const { data: rawBlockComments = [] } = useQuery<CommentWithReplies[]>({
     queryKey: ['comments', selectedBlock?.hash],

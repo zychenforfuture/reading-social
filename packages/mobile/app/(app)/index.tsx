@@ -31,21 +31,18 @@ export default function DocumentListPage() {
   const handleUpload = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'text/plain', 'application/epub+zip', 'text/html'],
+        type: ['text/plain'], // Backend seems to only expect text/plain effectively since it's just raw text. Wait, web only allows .txt
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
 
       const file = result.assets[0];
-      const formData = new FormData();
-      formData.append('file', {
-        uri: file.uri,
-        name: file.name,
-        type: file.mimeType || 'application/octet-stream',
-      } as any);
-
+      
       setUploading(true);
-      await documents.upload(formData);
+      const response = await fetch(file.uri);
+      const content = await response.text();
+
+      await documents.upload(file.name, content);
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       Alert.alert('上传成功', '文档已上传并正在处理');
     } catch (e: any) {
@@ -78,7 +75,7 @@ export default function DocumentListPage() {
     >
       <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
       <Text style={styles.cardMeta}>
-        {item.author || '未知作者'} · {new Date(item.created_at).toLocaleDateString('zh-CN')}
+        {item.uploader || '未知作者'} · {new Date(item.created_at).toLocaleDateString('zh-CN')}
       </Text>
       {item.block_count != null && (
         <Text style={styles.cardBlocks}>{item.block_count} 个段落</Text>
