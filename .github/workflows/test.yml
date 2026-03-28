@@ -1,4 +1,4 @@
-name: API Tests
+name: CI Pipeline
 
 on:
   push:
@@ -7,9 +7,54 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
-    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run lint
+        run: pnpm run lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run typecheck
+        run: pnpm run typecheck
+
+  test-api:
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -24,13 +69,21 @@ jobs:
           --health-interval=5s
           --health-timeout=3s
           --health-retries=3
-      
       redis:
         image: redis:7-alpine
         ports:
           - 6380:6379
         options: >-
           --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=3
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6334:6333
+        options: >-
+          --health-cmd="bash -c '</dev/tcp/localhost/6333' 2>/dev/null && exit 0 || exit 1"
           --health-interval=5s
           --health-timeout=3s
           --health-retries=3
@@ -53,59 +106,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Initialize test database schema
+      - name: Build types
+        run: pnpm --filter @collab/types build
+
+      - name: Initialize database schema
         run: |
           PGPASSWORD=testpassword psql -h 127.0.0.1 -p 5433 -U admin -d collab_comments_test -f docker/postgres/init.sql
           pnpm --filter @collab/api run db:migrate
         env:
-          PGPASSWORD: testpassword
           DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
 
-      - name: Wait for Postgres and Redis ports
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 90); do
-            if (echo > /dev/tcp/127.0.0.1/5433) >/dev/null 2>&1; then
-              echo "Postgres is ready on 5433"
-              break
-            fi
-            if [ "$i" -eq 90 ]; then
-              echo "Postgres port 5433 not ready in time"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          for i in $(seq 1 90); do
-            if (echo > /dev/tcp/127.0.0.1/6380) >/dev/null 2>&1; then
-              echo "Redis is ready on 6380"
-              break
-            fi
-            if [ "$i" -eq 90 ]; then
-              echo "Redis port 6380 not ready in time"
-              exit 1
-            fi
-            sleep 1
-          done
-
-      - name: Run lint
-        run: pnpm -r lint
-
-      - name: Run tests
-        run: pnpm --filter @collab/api test
-        env:
-          NODE_ENV: test
-          DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
-          REDIS_URL: redis://127.0.0.1:6380
-          JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
-
-      - name: Run coverage
+      - name: Run API tests
         run: pnpm --filter @collab/api test -- --coverage
-        continue-on-error: true
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
           REDIS_URL: redis://127.0.0.1:6380
+          QDRANT_URL: http://127.0.0.1:6334
           JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
 
       - name: Upload coverage to Coveralls
@@ -115,3 +132,138 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: packages/api/coverage/lcov.info
+
+  test-worker:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6334:6333
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build types
+        run: pnpm --filter @collab/types build
+
+      - name: Run Worker tests
+        run: pnpm --filter @collab/worker test
+        env:
+          NODE_ENV: test
+          REDIS_URL: redis://127.0.0.1:6380
+          QDRANT_URL: http://127.0.0.1:6334
+
+  test-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build types
+        run: pnpm --filter @collab/types build
+
+      - name: Run Web unit tests
+        run: pnpm --filter @collab/web test
+
+  test-e2e:
+    needs: [test-api, test-web]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: collab_comments_test
+        ports:
+          - 5433:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6334:6333
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build all
+        run: pnpm run build
+
+      - name: Initialize database schema
+        run: |
+          PGPASSWORD=testpassword psql -h 127.0.0.1 -p 5433 -U admin -d collab_comments_test -f docker/postgres/init.sql
+          pnpm --filter @collab/api run db:migrate
+        env:
+          DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
+
+      - name: Install Playwright Browsers
+        run: pnpm --filter @collab/web exec playwright install --with-deps
+
+      - name: Run Playwright E2E tests
+        run: pnpm --filter @collab/web run test:e2e
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://admin:testpassword@127.0.0.1:5433/collab_comments_test
+          REDIS_URL: redis://127.0.0.1:6380
+          QDRANT_URL: http://127.0.0.1:6334
+          JWT_SECRET: test-jwt-secret-for-ci-run-min-32-chars-xyz
+
+      - name: Upload Playwright reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/web/playwright-report/
+          retention-days: 30
