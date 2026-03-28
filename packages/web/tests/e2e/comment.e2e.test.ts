@@ -7,16 +7,32 @@ test.describe('Comment System', () => {
     await page.getByPlaceholder('密码').fill(process.env.TEST_PASSWORD || 'test123');
     await page.getByRole('button', { name: /登入/ }).click();
     await page.waitForURL('/');
-    
-    // 从文档列表点击第一个文档进入阅读页
-    await page.getByRole('button', { name: '打开' }).first().click();
+
+    const openButtons = page.getByRole('button', { name: '打开' });
+    const enabledOpenButtons = page.locator('button:has-text("打开"):not([disabled])');
+
+    if ((await enabledOpenButtons.count()) === 0) {
+      await page.getByRole('button', { name: '新建文档' }).click();
+      await page.getByPlaceholder('输入文档标题').fill(`E2E 文档 ${Date.now()}`);
+      await page.getByPlaceholder('输入文档内容...').fill('第一章\n这是用于评论系统 E2E 的测试内容。');
+      await page.getByRole('button', { name: '创建' }).click();
+
+      // 新建后文档可能先处于 processing，等待出现可点击的“打开”按钮
+      await expect
+        .poll(async () => enabledOpenButtons.count(), { timeout: 60000 })
+        .toBeGreaterThan(0);
+    }
+
+    await expect(openButtons.first()).toBeVisible({ timeout: 20000 });
+    await expect(enabledOpenButtons.first()).toBeVisible({ timeout: 20000 });
+    await enabledOpenButtons.first().click();
     
     // 等待文档内容加载出来 (寻找正文段落)
     await page.waitForSelector('.break-words.cursor-pointer');
   });
 
   test('should display comment section', async ({ page }) => {
-    await expect(page.getByRole('button', { name: '评论', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^评论/ })).toBeVisible();
   });
 
   test('should allow creating a comment', async ({ page }) => {
