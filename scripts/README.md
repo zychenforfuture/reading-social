@@ -67,3 +67,11 @@ pnpm test
 - [docs/development.md](../docs/development.md) - 开发文档
 - [docs/testing.md](../docs/testing.md) - 测试文档
 - [docs/deployment.md](../docs/deployment.md) - 部署文档
+- [docs/ops/TEMPLATE.md](../docs/ops/TEMPLATE.md) - 运维文档模板
+- [docs/ops/README.md](../docs/ops/README.md) - 运维文档索引
+- [docs/ops/发布清单.md](../docs/ops/发布清单.md) - 发布前后检查与回滚清单
+- [docs/ops/值班手册模板.md](../docs/ops/值班手册模板.md) - 值班巡检与告警处置模板
+- [docs/ops/事故复盘模板.md](../docs/ops/事故复盘模板.md) - 事故复盘模板
+- [docs/ops/runbooks/数据库连接故障排查.md](../docs/ops/runbooks/数据库连接故障排查.md) - 数据库连接故障排查
+- [docs/ops/runbooks/队列堆积排查.md](../docs/ops/runbooks/队列堆积排查.md) - 队列堆积排查
+- [docs/ops/runbooks/Qdrant不可用排查.md](../docs/ops/runbooks/Qdrant不可用排查.md) - Qdrant 不可用排查

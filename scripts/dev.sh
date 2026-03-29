@@ -13,19 +13,46 @@ ENV_FILE="${ENV_FILE:-.env}"
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+SCRIPT_TAG='[dev.sh]'
+
+log_info() {
+  echo -e "${BLUE}${SCRIPT_TAG} [INFO] $*${NC}"
+}
+
+log_warn() {
+  echo -e "${YELLOW}${SCRIPT_TAG} [WARN] $*${NC}"
+}
+
+log_ok() {
+  echo -e "${GREEN}${SCRIPT_TAG} [OK] $*${NC}"
+}
+
+log_error() {
+  echo -e "${RED}${SCRIPT_TAG} [ERROR] $*${NC}"
+}
+
+on_error() {
+  local exit_code=$?
+  log_error "执行失败，退出码=${exit_code}。"
+  exit "$exit_code"
+}
+
+trap on_error ERR
 
 if command -v docker-compose >/dev/null 2>&1; then
   COMPOSE_CMD="docker-compose"
 elif docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD="docker compose"
 else
-  echo -e "${RED}✗ 未检测到 Docker Compose，请安装 Docker Desktop 或 docker-compose 插件。${NC}"
+  log_error "未检测到 Docker Compose，请安装 Docker Desktop 或 docker-compose 插件。"
   exit 1
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo -e "${RED}✗ 未检测到 Docker，请先安装并启动 Docker Desktop / Docker Engine。${NC}"
+  log_error "未检测到 Docker，请先安装并启动 Docker Desktop / Docker Engine。"
   exit 1
 fi
 
@@ -36,7 +63,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 
 if ! command -v pnpm >/dev/null 2>&1; then
-  echo -e "${RED}✗ 未检测到 pnpm，请先执行 corepack enable 或安装 pnpm。${NC}"
+  log_error "未检测到 pnpm，请先执行 corepack enable 或安装 pnpm。"
   exit 1
 fi
 
@@ -62,11 +89,11 @@ ensure_env_file() {
   fi
 
   if [ -f ".env.example" ]; then
-    echo -e "${YELLOW}未找到 $ENV_FILE，正在从 .env.example 复制模板...${NC}"
+    log_warn "未找到 $ENV_FILE，正在从 .env.example 复制模板..."
     cp .env.example "$ENV_FILE"
-    echo -e "${YELLOW}已生成 $ENV_FILE，请根据实际配置修改后重新运行。${NC}"
+    log_warn "已生成 $ENV_FILE，请根据实际配置修改后重新运行。"
   else
-    echo -e "${RED}✗ 未找到 $ENV_FILE，且缺少 .env.example 模板。${NC}"
+    log_error "未找到 $ENV_FILE，且缺少 .env.example 模板。"
   fi
   exit 1
 }
@@ -107,13 +134,13 @@ normalize_runtime_env() {
   if [ -z "${DATABASE_URL:-}" ] || [ "${DB_PASSWORD}" != "${db_pass_from_url:-}" ]; then
     DATABASE_URL="postgresql://admin:${DB_PASSWORD}@localhost:5432/collab_comments"
     export DATABASE_URL
-    echo -e "${YELLOW}已对齐 DATABASE_URL 与 DB_PASSWORD。${NC}"
+    log_warn "已对齐 DATABASE_URL 与 DB_PASSWORD。"
   fi
 
   if [ -z "${REDIS_URL:-}" ] || [ "${REDIS_PASSWORD}" != "${redis_pass_from_url:-}" ]; then
     REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379"
     export REDIS_URL
-    echo -e "${YELLOW}已对齐 REDIS_URL 与 REDIS_PASSWORD。${NC}"
+    log_warn "已对齐 REDIS_URL 与 REDIS_PASSWORD。"
   fi
 
   if [ -z "${QDRANT_URL:-}" ]; then
@@ -123,15 +150,15 @@ normalize_runtime_env() {
 }
 
 start_infra() {
-  echo -e "${YELLOW}启动基础设施容器 (postgres + redis + qdrant)...${NC}"
+  log_info "启动基础设施容器 (postgres + redis + qdrant)..."
   $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d postgres redis qdrant
-  echo -e "${GREEN}✓ 基础设施已启动${NC}"
+  log_ok "基础设施已启动。"
 }
 
 wait_for_infra() {
   local retries=30
 
-  echo -e "${YELLOW}等待基础设施就绪...${NC}"
+  log_info "等待基础设施就绪..."
   while [ "$retries" -gt 0 ]; do
     if docker exec collab-postgres pg_isready -U admin -d collab_comments >/dev/null 2>&1; then
       break
@@ -141,7 +168,7 @@ wait_for_infra() {
   done
 
   if [ "$retries" -le 0 ]; then
-    echo -e "${RED}✗ PostgreSQL 未在预期时间内就绪。${NC}"
+    log_error "PostgreSQL 未在预期时间内就绪。"
     exit 1
   fi
 
@@ -155,11 +182,11 @@ wait_for_infra() {
   done
 
   if [ "$retries" -le 0 ]; then
-    echo -e "${RED}✗ Redis 未在预期时间内就绪。${NC}"
+    log_error "Redis 未在预期时间内就绪。"
     exit 1
   fi
 
-  echo -e "${GREEN}✓ 基础设施健康检查通过${NC}"
+  log_ok "基础设施健康检查通过。"
 }
 
 ensure_postgres_password() {
@@ -167,7 +194,7 @@ ensure_postgres_password() {
   escaped_db_password=${DB_PASSWORD//\'/\'\'}
 
   docker exec collab-postgres psql -U admin -d postgres -c "ALTER USER admin WITH PASSWORD '${escaped_db_password}';" >/dev/null
-  echo -e "${GREEN}✓ PostgreSQL 凭据已对齐${NC}"
+  log_ok "PostgreSQL 凭据已对齐。"
 }
 
 ensure_core_schema() {
@@ -175,32 +202,32 @@ ensure_core_schema() {
   has_schema="$(docker exec collab-postgres psql -U admin -d collab_comments -tAc "SELECT (to_regclass('public.users') IS NOT NULL AND to_regclass('public.comments') IS NOT NULL AND to_regclass('public.notifications') IS NOT NULL)::int;" 2>/dev/null | tr -d '[:space:]')"
 
   if [ "$has_schema" = "1" ]; then
-    echo -e "${GREEN}✓ 核心表结构已存在${NC}"
+    log_ok "核心表结构已存在。"
     return
   fi
 
-  echo -e "${YELLOW}检测到核心表结构缺失，正在初始化数据库...${NC}"
+  log_warn "检测到核心表结构缺失，正在初始化数据库..."
   if ! docker exec -i collab-postgres psql -U admin -d collab_comments < docker/postgres/init.sql >/dev/null 2>&1; then
-    echo -e "${RED}✗ 执行数据库初始化脚本失败。${NC}"
+    log_error "执行数据库初始化脚本失败。"
     exit 1
   fi
 
   has_schema="$(docker exec collab-postgres psql -U admin -d collab_comments -tAc "SELECT (to_regclass('public.users') IS NOT NULL AND to_regclass('public.comments') IS NOT NULL AND to_regclass('public.notifications') IS NOT NULL)::int;" 2>/dev/null | tr -d '[:space:]')"
   if [ "$has_schema" != "1" ]; then
-    echo -e "${RED}✗ 数据库初始化后核心表仍缺失，请检查 docker/postgres/init.sql。${NC}"
+    log_error "数据库初始化后核心表仍缺失，请检查 docker/postgres/init.sql。"
     exit 1
   fi
 
-  echo -e "${GREEN}✓ 核心表结构初始化完成${NC}"
+  log_ok "核心表结构初始化完成。"
 }
 
 ensure_redis_password() {
   if ! docker exec collab-redis redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping >/dev/null 2>&1; then
-    echo -e "${RED}✗ Redis 密码校验失败，请检查 REDIS_PASSWORD 与 REDIS_URL。${NC}"
+    log_error "Redis 密码校验失败，请检查 REDIS_PASSWORD 与 REDIS_URL。"
     exit 1
   fi
 
-  echo -e "${GREEN}✓ Redis 凭据已对齐${NC}"
+  log_ok "Redis 凭据已对齐。"
 }
 
 reconcile_mixed_runtime() {
@@ -212,10 +239,10 @@ reconcile_mixed_runtime() {
 }
 
 stop_infra() {
-  echo -e "${YELLOW}停止基础设施容器...${NC}"
+  log_info "停止基础设施容器..."
   $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop postgres redis qdrant >/dev/null 2>&1 || true
   $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" rm -f postgres redis qdrant >/dev/null 2>&1 || true
-  echo -e "${GREEN}✓ 基础设施已停止${NC}"
+  log_ok "基础设施已停止。"
 }
 
 infra_status() {
@@ -230,7 +257,7 @@ pids=()
 
 stop_processes() {
   if [ "${#pids[@]}" -gt 0 ]; then
-    echo -e "${YELLOW}停止本地开发进程...${NC}"
+    log_info "停止本地开发进程..."
     for pid in "${pids[@]}"; do
       if kill -0 "$pid" >/dev/null 2>&1; then
         kill "$pid" >/dev/null 2>&1 || true
@@ -244,7 +271,7 @@ stop_processes() {
 }
 
 run_app_processes() {
-  echo -e "${YELLOW}启动本地 API / Worker / Web 进程...${NC}"
+  log_info "启动本地 API / Worker / Web 进程..."
   pnpm --filter @collab/api dev &
   pids+=($!)
   pnpm --filter @collab/worker dev &
@@ -256,7 +283,7 @@ run_app_processes() {
   wait -n "${pids[@]}"
   exit_code=$?
   stop_processes
-  echo -e "${YELLOW}本地进程已退出。如需停止容器，请执行 ./scripts/dev.sh down。${NC}"
+  log_warn "本地进程已退出。如需停止容器，请执行 ./scripts/dev.sh down。"
   exit "$exit_code"
 }
 

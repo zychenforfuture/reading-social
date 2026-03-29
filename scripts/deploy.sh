@@ -7,9 +7,39 @@ cd "$PROJECT_ROOT"
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE="${ENV_FILE:-.env.production}"
 
-echo "=========================================="
-echo "  跨文档协同评论系统 - Docker 部署脚本"
-echo "=========================================="
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+SCRIPT_TAG='[deploy.sh]'
+
+log_info() {
+  echo -e "${BLUE}${SCRIPT_TAG} [INFO] $*${NC}"
+}
+
+log_warn() {
+  echo -e "${YELLOW}${SCRIPT_TAG} [WARN] $*${NC}"
+}
+
+log_ok() {
+  echo -e "${GREEN}${SCRIPT_TAG} [OK] $*${NC}"
+}
+
+log_error() {
+  echo -e "${RED}${SCRIPT_TAG} [ERROR] $*${NC}"
+}
+
+on_error() {
+  local exit_code=$?
+  log_error "执行失败，退出码=${exit_code}。"
+  exit "$exit_code"
+}
+
+trap on_error ERR
+
+log_info "跨文档协同评论系统 - Docker 部署脚本"
 
 # 确定 compose 命令
 if command -v docker-compose >/dev/null 2>&1; then
@@ -17,7 +47,7 @@ if command -v docker-compose >/dev/null 2>&1; then
 elif docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD="docker compose"
 else
-  echo "错误：未检测到 Docker Compose，请安装 Docker Desktop 或 docker-compose 插件。"
+  log_error "未检测到 Docker Compose，请安装 Docker Desktop 或 docker-compose 插件。"
   exit 1
 fi
 
@@ -41,9 +71,9 @@ EOF
 
 require_env() {
   if [ ! -f "$ENV_FILE" ]; then
-    echo "错误：未找到生产环境配置文件 $ENV_FILE"
+    log_error "未找到生产环境配置文件 $ENV_FILE"
     if [ -f ".env.production.example" ]; then
-      echo "提示：可执行 cp .env.production.example $ENV_FILE 并按需修改。"
+      log_warn "可执行 cp .env.production.example $ENV_FILE 并按需修改。"
     fi
     exit 1
   fi
@@ -65,7 +95,7 @@ check_required_env() {
   done
 
   if [ "${#missing[@]}" -ne 0 ]; then
-    echo "错误：以下环境变量未设置：${missing[*]}"
+    log_error "以下环境变量未设置：${missing[*]}"
     exit 1
   fi
 }
@@ -83,50 +113,52 @@ postgres_container_id() {
 case "${1:-}" in
   up)
     ensure_env_ready
-    echo "构建并启动全量 Docker 服务..."
+    log_info "构建并启动全量 Docker 服务..."
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
-    echo "服务启动中，可用以下命令查看状态或日志："
-    echo "  ./scripts/deploy.sh status"
-    echo "  ./scripts/deploy.sh logs"
+    log_ok "服务已启动，可用 status/logs 查看详情。"
     ;;
   down)
     ensure_env_ready
-    echo "停止并移除服务容器（保留数据卷）..."
+    log_info "停止并移除服务容器（保留数据卷）..."
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down --remove-orphans
+    log_ok "服务已停止。"
     ;;
   restart)
     ensure_env_ready
-    echo "重启服务..."
+    log_info "重启服务..."
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down --remove-orphans
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
+    log_ok "服务已重启。"
     ;;
   rebuild)
     ensure_env_ready
-    echo "重新构建镜像..."
+    log_info "重新构建镜像..."
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache
-    echo "启动服务..."
+    log_info "启动服务..."
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+    log_ok "镜像重建并启动完成。"
     ;;
   logs)
     ensure_env_ready
-    echo "查看服务日志（按 Ctrl+C 退出）..."
+    log_info "查看服务日志（按 Ctrl+C 退出）..."
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs -f
     ;;
   status)
     ensure_env_ready
+    log_info "当前服务状态："
     $COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
     ;;
   db-backup)
     ensure_env_ready
     PG_CONTAINER="$(postgres_container_id)"
     if [ -z "$PG_CONTAINER" ]; then
-      echo "错误：PostgreSQL 容器未运行，无法备份。请先执行 ./scripts/deploy.sh up"
+      log_error "PostgreSQL 容器未运行，无法备份。请先执行 ./scripts/deploy.sh up"
       exit 1
     fi
     BACKUP_FILE="backup-$(date +%Y%m%d-%H%M%S).sql"
-    echo "备份数据库到 $BACKUP_FILE ..."
+    log_info "备份数据库到 $BACKUP_FILE ..."
     docker exec "$PG_CONTAINER" pg_dump -U admin collab_comments > "$BACKUP_FILE"
-    echo "备份完成：$BACKUP_FILE"
+    log_ok "备份完成：$BACKUP_FILE"
     ;;
   help|-h|--help)
     usage
@@ -137,4 +169,4 @@ case "${1:-}" in
     ;;
 esac
 
-echo "完成！"
+log_ok "命令执行完成。"
